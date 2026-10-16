@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ExtendedTriangle } from 'three-mesh-bvh';
+import type { ExtendedTriangle, MeshBVH } from 'three-mesh-bvh';
 import { PLAYER } from '../config';
 import type { Input } from '../core/Input';
 import type { World } from '../world/World';
@@ -27,6 +27,8 @@ export class Player {
   readonly stamina = new Stamina();
   /** Set by the game when movement must stop (menus, caught sequence). */
   frozen = false;
+  /** Looking around still works, walking does not (cutscenes). */
+  movementLocked = false;
   onFootstep: (mode: MoveMode) => void = () => {};
 
   private bobDistance = 0;
@@ -57,7 +59,8 @@ export class Player {
     }
 
     // Crouch: hold Ctrl or C. Standing up is blocked under low ceilings.
-    const wantsCrouch = !this.frozen && (input.isDown('ControlLeft') || input.isDown('ControlRight') || input.isDown('KeyC'));
+    const canMove = !this.frozen && !this.movementLocked;
+    const wantsCrouch = canMove && (input.isDown('ControlLeft') || input.isDown('ControlRight') || input.isDown('KeyC'));
     if (wantsCrouch) this.crouching = true;
     else if (this.crouching && !this.overlaps(world, this.position, PLAYER.standHeight)) this.crouching = false;
     const targetHeight = this.crouching ? PLAYER.crouchHeight : PLAYER.standHeight;
@@ -65,7 +68,7 @@ export class Player {
 
     // Desired horizontal direction from WASD in camera yaw space.
     this.wish.set(0, 0, 0);
-    if (!this.frozen) {
+    if (canMove) {
       if (input.isDown('KeyW') || input.isDown('ArrowUp')) this.wish.z -= 1;
       if (input.isDown('KeyS') || input.isDown('ArrowDown')) this.wish.z += 1;
       if (input.isDown('KeyA') || input.isDown('ArrowLeft')) this.wish.x -= 1;
@@ -74,7 +77,7 @@ export class Player {
     const moving = this.wish.lengthSq() > 0;
     if (moving) this.wish.normalize().applyAxisAngle(UP, this.yaw);
 
-    const wantsSprint = !this.frozen && !this.crouching && (input.isDown('ShiftLeft') || input.isDown('ShiftRight'));
+    const wantsSprint = canMove && !this.crouching && (input.isDown('ShiftLeft') || input.isDown('ShiftRight'));
     const sprinting = this.stamina.update(dt, wantsSprint, moving);
     const speed = this.crouching ? PLAYER.crouchSpeed : sprinting ? PLAYER.sprintSpeed : PLAYER.walkSpeed;
 
@@ -144,7 +147,11 @@ export class Player {
   }
 
   private pushOut(world: World, r: number): void {
-    world.bvh.shapecast({
+    for (const bvh of world.colliders) this.pushOutOf(bvh, r);
+  }
+
+  private pushOutOf(bvh: MeshBVH, r: number): void {
+    bvh.shapecast({
       intersectsBounds: (b) => b.intersectsBox(this.box),
       intersectsTriangle: (tri: ExtendedTriangle) => {
         const d = tri.closestPointToSegment(this.seg, this.triPoint, this.capPoint);
@@ -164,15 +171,18 @@ export class Player {
     const r = PLAYER.radius * 0.95;
     this.setSegment(feet, height);
     let hit = false;
-    world.bvh.shapecast({
-      intersectsBounds: (b) => b.intersectsBox(this.box),
-      intersectsTriangle: (tri: ExtendedTriangle) => {
-        // Ignore the floor under the feet: only test the part of the capsule above knee height.
-        const seg = new THREE.Line3(this.seg.start.clone().setY(this.seg.start.y + 0.25), this.seg.end);
-        if (tri.closestPointToSegment(seg, this.triPoint, this.capPoint) < r) hit = true;
-        return hit;
-      },
-    });
+    // Ignore the floor under the feet: only test the part of the capsule above knee height.
+    const seg = new THREE.Line3(this.seg.start.clone().setY(this.seg.start.y + 0.25), this.seg.end);
+    for (const bvh of world.colliders) {
+      if (hit) break;
+      bvh.shapecast({
+        intersectsBounds: (b) => b.intersectsBox(this.box),
+        intersectsTriangle: (tri: ExtendedTriangle) => {
+          if (tri.closestPointToSegment(seg, this.triPoint, this.capPoint) < r) hit = true;
+          return hit;
+        },
+      });
+    }
     return hit;
   }
 }

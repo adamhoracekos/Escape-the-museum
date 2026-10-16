@@ -83,6 +83,10 @@ body {
 .fig-label.show {
   opacity: 1;
 }
+.fig-label.show.dim {
+  opacity: 0.3;
+  transition: opacity 1.2s;
+}
 .fig-label i {
   position: absolute;
   left: -4px;
@@ -238,6 +242,38 @@ body {
   text-transform: uppercase;
   color: var(--red);
   margin-bottom: 4px;
+}
+
+.fade {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+.chapter-card {
+  display: grid;
+  gap: 6px;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.5s;
+}
+.fade.with-card .chapter-card {
+  opacity: 1;
+}
+.chapter-card em {
+  font: 500 13px var(--mono);
+  font-style: normal;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--red);
+}
+.chapter-card strong {
+  font: 800 56px/1 var(--display);
+  letter-spacing: -0.01em;
+  color: var(--paper);
 }
 
 .screen {

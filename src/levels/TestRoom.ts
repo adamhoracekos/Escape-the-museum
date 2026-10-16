@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import type { Exhibit, Interactable } from '../interaction/types';
 import { World, type SurfaceZone } from '../world/World';
-import { MAT, batteryMesh, benchMesh, box, bustMesh, coveredStatue, fragmentMesh, wall } from '../world/props';
+import { MAT, benchMesh, box, bustMesh, coveredStatue, wall } from '../world/props';
 import { checkerTexture, gridTexture, noiseTexture, posterTexture, signTexture } from '../world/textures';
 import type { Checkpoint, Level, LevelServices } from './Level';
+import { Pickups } from './pickups';
 
 /**
- * Greybox test level for step 2 of the plan: movement, crouching, ramps and stairs,
+ * Greybox test level from step 2, kept as a debug-only level (debug panel, key 0): movement, crouching, ramps and stairs,
  * flashlight in a dark room, pickups, labels, checkpoints and noise surfaces.
  *
  *  Room A "Conservation Lab"  x -6..6,  z -5..5   (dimly lit, safe)
@@ -189,49 +190,13 @@ export function createTestRoom(svc: LevelServices): Level {
 
   // Pickups
   const interactables: Interactable[] = [];
-  const pickups: { id: string; obj: THREE.Object3D; base: THREE.Vector3; spin: boolean }[] = [];
-  // Small pickups get an invisible, larger hit sphere so they are easy to aim at.
-  const proxyGeo = new THREE.SphereGeometry(0.2, 8, 6);
-  const withProxy = (o: THREE.Object3D) => {
-    const proxy = new THREE.Mesh(proxyGeo, new THREE.MeshBasicMaterial({ visible: false }));
-    proxy.userData.noCollide = true;
-    o.add(proxy);
-    return o;
-  };
-  const placeFragment = (id: string, pos: THREE.Vector3, seed: number) => {
-    const m = withProxy(fragmentMesh(seed));
-    m.position.copy(pos);
-    root.add(m);
-    pickups.push({ id, obj: m, base: pos.clone(), spin: true });
-    interactables.push({
-      id,
-      object: m,
-      prompt: () => (svc.isCollected(id) ? null : 'Pick up fragment'),
-      interact: () => {
-        svc.collectFragment(id);
-        m.visible = false;
-      },
-    });
-  };
-  const placeBattery = (id: string, pos: THREE.Vector3) => {
-    const m = withProxy(batteryMesh());
-    m.position.copy(pos);
-    root.add(m);
-    pickups.push({ id, obj: m, base: pos.clone(), spin: false });
-    interactables.push({
-      id,
-      object: m,
-      prompt: () => (svc.isCollected(id) ? null : 'Take battery'),
-      interact: () => {
-        if (svc.collectBattery(id)) m.visible = false;
-      },
-    });
-  };
-  placeFragment('test-fragment-1', new THREE.Vector3(17.5, 1.45, -5.6), 1);
-  placeFragment('test-fragment-2', new THREE.Vector3(26, 0.35, 0.5), 2);
-  placeBattery('test-battery-1', new THREE.Vector3(0.6, 1.0, -1.4));
-  placeBattery('test-battery-2', new THREE.Vector3(18.6, 0.85, 3.8));
-  placeBattery('test-battery-3', new THREE.Vector3(25.2, 0.05, -1.3));
+  const pickups = new Pickups(root, svc, interactables);
+  pickups.fragment('test-room/fragment-1', new THREE.Vector3(17.5, 1.45, -5.6), 1);
+  pickups.fragment('test-room/fragment-2', new THREE.Vector3(26, 0.35, 0.5), 2);
+  pickups.battery('test-room/battery-1', new THREE.Vector3(0.6, 1.0, -1.4));
+  pickups.battery('test-room/battery-2', new THREE.Vector3(18.6, 0.85, 3.8));
+  pickups.battery('test-room/battery-3', new THREE.Vector3(25.2, 0.05, -1.3));
+  const found = () => svc.progress.fragments('test-room');
 
   const TOTAL = 2;
   let assembled = false;
@@ -240,11 +205,11 @@ export function createTestRoom(svc: LevelServices): Level {
     object: table,
     prompt: () => {
       if (assembled) return null;
-      const n = svc.fragmentsCollected();
+      const n = found();
       return n >= TOTAL ? 'Assemble the fragments' : `Conservation table (${n} / ${TOTAL} fragments)`;
     },
     interact: () => {
-      if (svc.fragmentsCollected() >= TOTAL) {
+      if (found() >= TOTAL) {
         assembled = true;
         svc.toast('Test artifact assembled. In a real level the way back to the rotunda would open now.');
       } else svc.toast('Not enough fragments yet.');
@@ -261,15 +226,15 @@ export function createTestRoom(svc: LevelServices): Level {
       object: vitrine,
       anchor: new THREE.Vector3(-4, 1.9, -3.5),
       fig: 'Fig. 2',
-      text: () => (svc.fragmentsCollected() >= 1 ? 'Bust of a donor. It has turned to look at the door.' : 'Bust of a donor, marble, 1891.'),
-      warn: () => svc.fragmentsCollected() >= 1,
+      text: () => (found() >= 1 ? 'Bust of a donor. It has turned to look at the door.' : 'Bust of a donor, marble, 1891.'),
+      warn: () => found() >= 1,
     },
     {
       object: statue,
       anchor: new THREE.Vector3(14.5, 1.7, 0.3),
       fig: 'Fig. 3',
-      text: () => (svc.fragmentsCollected() >= 2 ? 'Covered exhibit. Facing you.' : 'Covered exhibit. Facing the wall.'),
-      warn: () => svc.fragmentsCollected() >= 2,
+      text: () => (found() >= 2 ? 'Covered exhibit. Facing you.' : 'Covered exhibit. Facing the wall.'),
+      warn: () => found() >= 2,
     },
     { object: poster, anchor: new THREE.Vector3(-5.8, 2.3, 1), fig: 'Fig. 4', text: () => 'Visitor guidance, printed after closing.' },
   ];
@@ -280,26 +245,26 @@ export function createTestRoom(svc: LevelServices): Level {
   return {
     id: 'test-room',
     title: 'Conservation Lab (test build)',
+    card: { kicker: 'Debug', title: 'Test room', long: false },
     root,
     world,
     checkpoints,
+    spawns: { start: checkpoints[0] },
     interactables,
     exhibits,
-    fragmentsTotal: TOTAL,
     background: new THREE.Color(0x020306),
+    fog: null,
+    exposure: 1.05,
+    status: () => `Fragments ${found()} / ${TOTAL}`,
     update(_dt, t) {
-      for (const p of pickups) {
-        if (!p.obj.visible) continue;
-        p.obj.position.y = p.base.y + Math.sin(t * 2 + p.base.x) * 0.03;
-        if (p.spin) p.obj.rotation.y = t * 0.8;
-      }
-      bust.rotation.y = svc.fragmentsCollected() >= 1 ? 0.9 : -0.5;
-      statue.rotation.y = svc.fragmentsCollected() >= 2 ? Math.PI * 0.5 : -Math.PI * 0.5;
+      pickups.update(t);
+      bust.rotation.y = found() >= 1 ? 0.9 : -0.5;
+      statue.rotation.y = found() >= 2 ? Math.PI * 0.5 : -Math.PI * 0.5;
       exitLight.intensity = Math.sin(t * 9) + Math.sin(t * 3.7) > 1.5 ? 0.05 : 0.6;
       benches.forEach((b) => (b.lamp.intensity = 3 + Math.sin(t * 1.3) * 0.15));
     },
     refresh() {
-      for (const p of pickups) p.obj.visible = !svc.isCollected(p.id);
+      pickups.refresh();
     },
   };
 }

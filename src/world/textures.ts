@@ -94,7 +94,12 @@ export function signTexture(text: string, bg: string, fg: string): THREE.CanvasT
     g.fillStyle = bg;
     g.fillRect(0, 0, w, h);
     g.fillStyle = fg;
-    g.font = '700 54px Jost, Futura, "Century Gothic", sans-serif';
+    // Shrink long titles until they fit with a margin.
+    let size = 54;
+    do {
+      g.font = `700 ${size}px Jost, Futura, "Century Gothic", sans-serif`;
+      size -= 2;
+    } while (g.measureText(text).width > w - 48 && size > 18);
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillText(text, w / 2, h / 2 + 3);

@@ -12,12 +12,14 @@ export interface MenuHandlers {
   onContinue: () => void;
   onNewGame: () => void;
   onResume: () => void;
+  onBackToTitle: () => void;
 }
 
 /** Title and pause screens. Every button is a real click so pointer lock can be requested from it. */
 export class Menu {
   private title: HTMLElement;
   private pause: HTMLElement;
+  private end: HTMLElement;
   private continueBtn: HTMLButtonElement;
   private note: HTMLElement;
 
@@ -27,7 +29,7 @@ export class Menu {
     this.title.className = 'screen title-screen';
     this.title.innerHTML = `
       <div class="panel">
-        <p class="vol">Illustrated Encyclopedia · Volume 2 · Test build</p>
+        <p class="vol">Illustrated Encyclopedia · Volume 2 · Build 3: the Rotunda</p>
         <h1>Escape the <span>Museum</span></h1>
         <p class="sub">The museum is closed. The exhibits are not.</p>
         <div class="buttons">
@@ -51,6 +53,19 @@ export class Menu {
       </div>`;
     container.appendChild(this.pause);
 
+    this.end = document.createElement('div');
+    this.end.className = 'screen end-screen';
+    this.end.hidden = true;
+    this.end.innerHTML = `
+      <div class="panel small">
+        <p class="vol">Fig. 1 · Visitor</p>
+        <h2>Collection incomplete.</h2>
+        <p class="sub">End of this test build. The Ice Age and Ancient Egypt wings are placeholders for now; their real levels come next.</p>
+        <div class="buttons"><button type="button" class="primary" data-act="title">Back to the title</button></div>
+      </div>`;
+    container.appendChild(this.end);
+    this.end.querySelector('[data-act="title"]')!.addEventListener('click', h.onBackToTitle);
+
     this.continueBtn = this.title.querySelector('[data-act="continue"]')!;
     this.note = this.title.querySelector('.note')!;
     this.continueBtn.addEventListener('click', h.onContinue);
@@ -63,6 +78,13 @@ export class Menu {
     this.note.textContent = storageAvailable ? '' : 'Progress cannot be saved in this browser window.';
     this.title.hidden = false;
     this.pause.hidden = true;
+    this.end.hidden = true;
+  }
+
+  showEnd(): void {
+    this.end.hidden = false;
+    this.title.hidden = true;
+    this.pause.hidden = true;
   }
 
   showPause(): void {
@@ -73,5 +95,6 @@ export class Menu {
   hideAll(): void {
     this.title.hidden = true;
     this.pause.hidden = true;
+    this.end.hidden = true;
   }
 }

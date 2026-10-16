@@ -1,21 +1,33 @@
 import * as THREE from 'three';
-import { PLAYER } from '../config';
+import { PLAYER, TRANSITION } from '../config';
 import { DebugPanel } from '../debug/DebugPanel';
 import { LookTargets } from '../interaction/LookTargets';
-import type { Checkpoint, Level, LevelServices } from '../levels/Level';
-import { createTestRoom } from '../levels/TestRoom';
+import type { Exhibit } from '../interaction/types';
+import type { Checkpoint, Level, LevelServices, TitleCard } from '../levels/Level';
+import { FIRST_LEVEL, LEVELS } from '../levels/registry';
 import { Flashlight } from '../player/Flashlight';
 import { Player } from '../player/Player';
+import { Progress } from '../progress/Progress';
 import { SaveSystem } from '../save/SaveSystem';
 import { Hud } from '../ui/Hud';
 import { Menu } from '../ui/Menu';
 import { Input } from './Input';
 
-type State = 'title' | 'playing' | 'paused' | 'caught';
+type State = 'title' | 'playing' | 'paused' | 'caught' | 'ending' | 'end';
+
+interface Transition {
+  phase: 'out' | 'hold' | 'in';
+  t: number;
+  to: string;
+  spawn: string;
+  card: TitleCard | null;
+}
 
 const CAUGHT_SECONDS = 3;
 /** The museum clock starts at closing time and runs while you play. */
 const CLOCK_START_MINUTES = 23 * 60;
+/** Ending beats in seconds: lights die, labels come on one by one, the last one, black. */
+const ENDING = { lightsStart: 1.5, lightsEnd: 6, labelsStart: 6.5, labelEvery: 0.35, visitorAt: 11, fadeAt: 16, cardAt: 18 } as const;
 
 export class Game {
   private renderer: THREE.WebGLRenderer;
@@ -29,14 +41,19 @@ export class Game {
   private menu: Menu;
   private debug: DebugPanel;
   private saves = new SaveSystem();
+  private progress = new Progress();
+  private levels = new Map<string, Level>();
   private level!: Level;
   private state: State = 'title';
-  private collected = new Set<string>();
   private checkpoint!: Checkpoint;
+  private transition: Transition | null = null;
   private caughtTimer = 0;
+  private endingTime = 0;
+  private visitorLabel: Exhibit;
   private playSeconds = 0;
   private clock = new THREE.Clock();
   private elapsed = 0;
+  private svc: LevelServices;
 
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -47,7 +64,7 @@ export class Game {
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
 
-    this.camera = new THREE.PerspectiveCamera(PLAYER.fov, 1, 0.05, 120);
+    this.camera = new THREE.PerspectiveCamera(PLAYER.fov, 1, 0.05, 140);
     this.scene.add(this.camera);
     this.input = new Input(this.renderer.domElement);
     this.player = new Player(this.camera);
@@ -58,13 +75,17 @@ export class Game {
       onContinue: () => this.start(true),
       onNewGame: () => this.start(false),
       onResume: () => this.resume(),
+      onBackToTitle: () => this.backToTitle(),
     });
 
     this.input.onLockChange = (locked) => {
       if (!locked && !this.input.dragLook && this.state === 'playing') this.pause();
     };
 
-    this.loadLevel();
+    const anchor = new THREE.Vector3();
+    this.visitorLabel = { object: this.camera, anchor, fig: 'Fig. 1', text: () => 'Visitor. Collection incomplete.', warn: () => true };
+    this.svc = this.services();
+    this.activate(FIRST_LEVEL);
     this.hud.setVisible(false);
     this.menu.showTitle(this.saves.load() !== null, this.saves.available);
 
@@ -77,91 +98,126 @@ export class Game {
 
   private services(): LevelServices {
     return {
-      isCollected: (id) => this.collected.has(id),
+      progress: this.progress,
       collectFragment: (id) => {
-        this.collected.add(id);
-        const n = this.fragmentsCollected();
-        this.hud.toast(`Fragment ${n} of ${this.level.fragmentsTotal} recovered`);
+        this.progress.add(id);
+        this.hud.toast('Fragment recovered');
       },
       collectBattery: (id) => {
         if (!this.flashlight.battery.addSpare()) {
           this.hud.toast('You cannot carry more batteries');
           return false;
         }
-        this.collected.add(id);
+        this.progress.add(id);
         this.hud.toast('Spare battery. Press R to swap it in.');
         return true;
       },
-      fragmentsCollected: () => this.fragmentsCollected(),
+      commit: (id) => {
+        this.progress.add(id);
+        this.save();
+        if (id.endsWith('/placed') && this.progress.isComplete()) this.startEnding();
+      },
       toast: (t) => this.hud.toast(t, 4),
       saveAtCheckpoint: (cp) => this.reachCheckpoint(cp, true),
+      travel: (to, spawn) => this.travel(to, spawn),
     };
   }
 
-  private fragmentsCollected(): number {
-    let n = 0;
-    for (const id of this.collected) if (id.includes('fragment')) n++;
-    return n;
+  /** Makes a level the current one, building it the first time it is needed. */
+  private activate(id: string): void {
+    const factory = LEVELS[id] ?? LEVELS[FIRST_LEVEL];
+    let level = this.levels.get(id);
+    if (!level) {
+      level = factory(this.svc);
+      this.levels.set(id, level);
+    }
+    if (this.level) this.scene.remove(this.level.root);
+    this.level = level;
+    this.scene.add(level.root);
+    this.scene.background = level.background;
+    this.scene.fog = level.fog;
+    this.renderer.toneMappingExposure = level.exposure;
+    this.look.interactables = level.interactables;
+    this.look.exhibits = level.exhibits;
+    level.refresh();
   }
 
-  private loadLevel(): void {
-    if (this.level) this.scene.remove(this.level.root);
-    this.level = createTestRoom(this.services());
-    this.scene.add(this.level.root);
-    this.scene.background = this.level.background;
-    this.look.interactables = this.level.interactables;
-    this.look.exhibits = this.level.exhibits;
+  /** Puts the player at a spawn of the current level and makes its first bench the checkpoint. */
+  private arrive(spawnId: string): void {
+    const spawn = this.level.spawns[spawnId] ?? this.level.checkpoints[0];
+    this.player.teleport(spawn.position, spawn.yaw);
+    this.checkpoint = this.level.checkpoints[0];
+    const inRotunda = this.level.id === 'rotunda';
+    // The rotunda is where you rest: the flashlight comes back full and is not needed there.
+    if (inRotunda) this.flashlight.battery.charge = 1;
+    this.flashlight.on = !inRotunda;
+  }
+
+  private travel(to: string, spawn: string): void {
+    if (this.transition || this.state !== 'playing') return;
+    this.transition = { phase: 'out', t: 0, to, spawn, card: null };
+  }
+
+  private save(): boolean {
+    return this.saves.save({
+      levelId: this.level.id,
+      checkpointId: this.checkpoint.id,
+      collected: [...this.progress.ids],
+      batteryCharge: this.flashlight.battery.charge,
+      spareBatteries: this.flashlight.battery.spares,
+    });
   }
 
   private start(continueSave: boolean): void {
-    this.collected.clear();
+    this.progress.load([]);
     this.flashlight.battery.charge = 1;
     this.flashlight.battery.spares = 0;
-    this.flashlight.on = true;
     this.playSeconds = 0;
-    let cp = this.level.checkpoints[0];
+    this.transition = null;
+    this.hud.setFade(0, null);
+    this.hud.setLabels([], this.camera, 0, 0);
     const save = continueSave ? this.saves.load() : null;
-    if (save && save.levelId === this.level.id) {
-      save.collected.forEach((id) => this.collected.add(id));
+    if (save && LEVELS[save.levelId]) {
+      this.progress.load(save.collected);
+      this.activate(save.levelId);
+      this.arrive('start');
       this.flashlight.battery.charge = save.batteryCharge;
       this.flashlight.battery.spares = save.spareBatteries;
-      cp = this.level.checkpoints.find((c) => c.id === save.checkpointId) ?? cp;
-    } else if (!continueSave) {
-      this.saves.clear();
+      const cp = this.level.checkpoints.find((c) => c.id === save.checkpointId) ?? this.level.checkpoints[0];
+      this.checkpoint = cp;
+      this.player.teleport(cp.position, cp.yaw);
+    } else {
+      if (!continueSave) this.saves.clear();
+      this.activate(FIRST_LEVEL);
+      this.arrive('start');
     }
-    this.level.refresh();
-    this.checkpoint = cp;
-    this.player.teleport(cp.position, cp.yaw);
     this.input.requestLock();
     this.menu.hideAll();
     this.hud.setVisible(true);
     this.state = 'playing';
     this.player.frozen = false;
+    this.player.movementLocked = false;
   }
 
   private reachCheckpoint(cp: Checkpoint, manual: boolean): void {
     const changed = this.checkpoint?.id !== cp.id;
     this.checkpoint = cp;
-    const ok = this.saves.save({
-      levelId: this.level.id,
-      checkpointId: cp.id,
-      collected: [...this.collected],
-      batteryCharge: this.flashlight.battery.charge,
-      spareBatteries: this.flashlight.battery.spares,
-    });
+    const ok = this.save();
     if (manual || changed) this.hud.toast(ok ? 'Progress saved' : 'Checkpoint reached (this browser cannot save)');
   }
 
   /** Being caught: dark card, then back to the last checkpoint with fragments kept (GDD 6). */
   catchPlayer(): void {
-    if (this.state !== 'playing') return;
+    if (this.state !== 'playing' || this.transition) return;
     this.state = 'caught';
     this.caughtTimer = CAUGHT_SECONDS;
     this.player.frozen = true;
+    this.hud.showCaught(`Fig. 41: Visitor. Acquired ${this.clockText()}.`);
+  }
+
+  private clockText(): string {
     const minutes = CLOCK_START_MINUTES + Math.floor(this.playSeconds / 60);
-    const hh = String(Math.floor(minutes / 60) % 24).padStart(2, '0');
-    const mm = String(minutes % 60).padStart(2, '0');
-    this.hud.showCaught(`Fig. 41: Visitor. Acquired ${hh}:${mm}.`);
+    return `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
   }
 
   private respawn(): void {
@@ -170,6 +226,52 @@ export class Game {
     this.flashlight.battery.topUpForRespawn();
     this.player.frozen = false;
     this.state = 'playing';
+  }
+
+  // ----- ending ----------------------------------------------------------------
+
+  /** Both artifacts are home: the rotunda goes dark and every label lights up (GDD 9). */
+  private startEnding(): void {
+    this.state = 'ending';
+    this.endingTime = 0;
+    this.player.movementLocked = true;
+  }
+
+  private updateEnding(dt: number): void {
+    this.endingTime += dt;
+    const t = this.endingTime;
+    const k = THREE.MathUtils.clamp((t - ENDING.lightsStart) / (ENDING.lightsEnd - ENDING.lightsStart), 0, 1);
+    this.level.setEnding?.(k);
+    this.flashlight.on = false;
+
+    const shown: Exhibit[] = [];
+    if (t > ENDING.labelsStart) {
+      const n = Math.floor((t - ENDING.labelsStart) / ENDING.labelEvery) + 1;
+      shown.push(...this.level.exhibits.filter((e) => e.object.visible).slice(0, n));
+    }
+    if (t > ENDING.visitorAt) {
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      this.visitorLabel.anchor.copy(this.camera.position).addScaledVector(fwd, 2).add(new THREE.Vector3(0, -0.25, 0));
+      shown.push(this.visitorLabel);
+    }
+    this.hud.setLabels(shown, this.camera, this.container.clientWidth, this.container.clientHeight, t > ENDING.visitorAt ? this.visitorLabel : null);
+    if (t > ENDING.fadeAt) this.hud.setFade(Math.min(1, (t - ENDING.fadeAt) / 1.5), null);
+    if (t > ENDING.cardAt && this.state === 'ending') {
+      this.state = 'end';
+      this.hud.setLabels([], this.camera, 0, 0);
+      this.hud.setVisible(false);
+      this.input.releaseLock();
+      this.menu.showEnd();
+    }
+  }
+
+  private backToTitle(): void {
+    this.state = 'title';
+    this.player.movementLocked = false;
+    this.hud.setFade(0, null);
+    this.hud.setVisible(false);
+    this.activate(FIRST_LEVEL);
+    this.menu.showTitle(this.saves.load() !== null, this.saves.available);
   }
 
   // ----- pause ---------------------------------------------------------------
@@ -183,7 +285,7 @@ export class Game {
   private resume(): void {
     this.menu.hideAll();
     this.input.requestLock();
-    this.player.frozen = false;
+    this.player.frozen = this.transition?.phase === 'hold';
     this.state = 'playing';
   }
 
@@ -202,6 +304,7 @@ export class Game {
     if (i.wasPressed('Backquote')) this.debug.toggle();
     if (this.state !== 'playing') return;
     if (i.wasPressed('Escape') && i.dragLook) this.pause();
+    if (this.transition) return;
     if (i.wasPressed('KeyF')) this.flashlight.toggle();
     if (i.wasPressed('KeyR')) {
       const b = this.flashlight.battery;
@@ -212,6 +315,46 @@ export class Game {
     if (this.debug.enabled) {
       if (i.wasPressed('KeyK')) this.catchPlayer();
       if (i.wasPressed('KeyV')) this.level.world.collider.visible = !this.level.world.collider.visible;
+      const jumps: Record<string, string> = { Digit1: 'rotunda', Digit2: 'ice-age', Digit3: 'egypt', Digit0: 'test-room' };
+      for (const [key, id] of Object.entries(jumps)) if (i.wasPressed(key)) this.travel(id, 'start');
+      if (i.wasPressed('KeyN')) {
+        for (let n = 1; n <= 4; n++) this.progress.add(`${this.level.id}/fragment-${n}`);
+        this.level.refresh();
+        this.hud.toast('Debug: all fragments of this level collected');
+      }
+    }
+  }
+
+  private updateTransition(dt: number): void {
+    const tr = this.transition;
+    if (!tr) return;
+    tr.t += dt;
+    if (tr.phase === 'out') {
+      this.hud.setFade(Math.min(1, tr.t / TRANSITION.fadeOut), null);
+      if (tr.t >= TRANSITION.fadeOut) {
+        this.activate(tr.to);
+        this.arrive(tr.spawn);
+        this.save();
+        this.renderer.compile(this.scene, this.camera);
+        tr.card = this.level.card;
+        tr.phase = 'hold';
+        tr.t = 0;
+        this.player.frozen = true;
+        this.hud.setFade(1, tr.card);
+      }
+    } else if (tr.phase === 'hold') {
+      if (tr.t >= (tr.card?.long ? TRANSITION.hold : TRANSITION.holdShort)) {
+        tr.phase = 'in';
+        tr.t = 0;
+        this.player.frozen = false;
+      }
+    } else {
+      this.hud.setFade(Math.max(0, 1 - tr.t / TRANSITION.fadeIn), tr.card);
+      if (tr.t >= TRANSITION.fadeIn) {
+        this.hud.setFade(0, null);
+        this.transition = null;
+        this.hud.toast(this.level.id === 'rotunda' ? 'Progress saved. The rotunda is safe.' : 'Progress saved', 3);
+      }
     }
   }
 
@@ -220,45 +363,54 @@ export class Game {
     this.elapsed += dt;
     this.handleKeys();
 
-    if (this.state === 'playing' || this.state === 'caught') {
-      if (this.state === 'playing') this.playSeconds += dt;
+    if (this.state === 'playing' || this.state === 'caught' || this.state === 'ending') {
+      if (this.state === 'playing') {
+        this.playSeconds += dt;
+        this.updateTransition(dt);
+      }
       this.player.update(dt, this.input, this.level.world);
       this.flashlight.update(dt, this.elapsed);
       this.level.update(dt, this.elapsed, this.player.position);
       this.look.update(this.camera, this.level.world);
 
-      for (const cp of this.level.checkpoints) {
-        if (cp.id !== this.checkpoint.id && cp.position.distanceTo(this.player.position) < cp.radius) this.reachCheckpoint(cp, false);
+      if (!this.transition && this.state === 'playing') {
+        for (const cp of this.level.checkpoints) {
+          if (cp.id !== this.checkpoint.id && cp.position.distanceTo(this.player.position) < cp.radius) this.reachCheckpoint(cp, false);
+        }
       }
 
       if (this.state === 'caught') {
         this.caughtTimer -= dt;
         if (this.caughtTimer <= 0) this.respawn();
       }
+      if (this.state === 'ending') this.updateEnding(dt);
 
       const b = this.flashlight.battery;
-      this.hud.setPrompt(this.state === 'playing' ? (this.look.focused?.prompt() ?? null) : null);
-      this.hud.setLabel(this.state === 'playing' ? this.look.focusedExhibit : null, this.camera, this.container.clientWidth, this.container.clientHeight);
+      const interactive = this.state === 'playing' && !this.transition;
+      this.hud.setPrompt(interactive ? (this.look.focused?.prompt() ?? null) : null);
+      this.hud.setLabel(interactive ? this.look.focusedExhibit : null, this.camera, this.container.clientWidth, this.container.clientHeight);
       this.hud.setBattery(b.charge, b.spares, this.flashlight.on, b.isLow);
       this.hud.setStamina(this.player.stamina.fraction, this.player.stamina.isExhausted);
-      this.hud.setFragments(this.fragmentsCollected(), this.level.fragmentsTotal);
+      this.hud.setStatus(this.state === 'ending' ? null : this.level.status());
       this.hud.update(dt);
     } else {
-      // Title and pause: slow drift so the menu has a living background.
+      // Title, pause and end: slow drift so the menu has a living background.
       this.input.consumeLook();
-      this.level.update(dt, this.elapsed, this.player.position);
-      if (this.state === 'title') {
-        this.camera.position.set(-2 + Math.sin(this.elapsed * 0.1) * 0.6, 1.7, 3.6);
-        this.camera.rotation.set(-0.12, -0.35 + Math.sin(this.elapsed * 0.07) * 0.15, 0, 'YXZ');
+      if (this.state !== 'paused') this.level.update(dt, this.elapsed, this.player.position);
+      if (this.state === 'title' && this.level.titleView) {
+        this.level.titleView(this.elapsed, this.camera);
+        this.flashlight.on = false;
         this.flashlight.update(0, this.elapsed);
       }
     }
 
     const p = this.player;
+    const ex = this.look.focusedExhibit;
     this.debug.update(
       dt,
       {
-        state: this.state,
+        state: this.state + (this.transition ? ` (${this.transition.phase} to ${this.transition.to})` : ''),
+        level: this.level.id,
         pos: `${p.position.x.toFixed(2)} ${p.position.y.toFixed(2)} ${p.position.z.toFixed(2)}`,
         mode: p.mode + (p.onGround ? '' : ' (air)'),
         surface: this.level.world.surfaceAt(p.position),
@@ -266,7 +418,7 @@ export class Game {
         stamina: `${p.stamina.value.toFixed(1)} s`,
         battery: `${(this.flashlight.battery.charge * 100).toFixed(0)} % +${this.flashlight.battery.spares}`,
         checkpoint: this.checkpoint?.id ?? '-',
-        look: this.look.focused?.id ?? this.look.focusedExhibit?.fig ?? '-',
+        look: this.look.focused?.id ?? (ex ? (typeof ex.fig === 'string' ? ex.fig : ex.fig()) : '-'),
         drawCalls: this.renderer.info.render.calls,
       },
       p.position,
