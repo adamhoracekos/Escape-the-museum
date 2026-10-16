@@ -31,7 +31,7 @@ export class Menu {
     this.title.className = 'screen title-screen';
     this.title.innerHTML = `
       <div class="panel">
-        <p class="vol">Illustrated Encyclopedia · Volume 2 · Build 4: the Hunter</p>
+        <p class="vol">Illustrated Encyclopedia · Volume 2 · Build 5: the Ice Age</p>
         <h1>Escape the <span>Museum</span></h1>
         <p class="sub">The museum is closed. The exhibits are not.</p>
         <div class="buttons">

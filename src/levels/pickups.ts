@@ -8,6 +8,8 @@ interface Pickup {
   obj: THREE.Object3D;
   base: THREE.Vector3;
   spin: boolean;
+  /** Pickups behind a puzzle only exist once it is solved. */
+  when: () => boolean;
 }
 
 /** Fragments and batteries lying around a level: placement, prompts, bobbing and save sync. */
@@ -30,15 +32,19 @@ export class Pickups {
     return o;
   }
 
-  fragment(id: string, pos: THREE.Vector3, seed: number): void {
+  private shown(p: Pickup): boolean {
+    return !this.svc.progress.has(p.id) && p.when();
+  }
+
+  fragment(id: string, pos: THREE.Vector3, seed: number, when: () => boolean = () => true): void {
     const m = this.withProxy(fragmentMesh(seed));
     m.position.copy(pos);
     this.root.add(m);
-    this.items.push({ id, obj: m, base: pos.clone(), spin: true });
+    this.items.push({ id, obj: m, base: pos.clone(), spin: true, when });
     this.interactables.push({
       id,
       object: m,
-      prompt: () => (this.svc.progress.has(id) ? null : 'Pick up fragment'),
+      prompt: () => (this.svc.progress.has(id) || !when() ? null : 'Pick up fragment'),
       interact: () => {
         this.svc.collectFragment(id);
         m.visible = false;
@@ -46,15 +52,15 @@ export class Pickups {
     });
   }
 
-  battery(id: string, pos: THREE.Vector3): void {
+  battery(id: string, pos: THREE.Vector3, when: () => boolean = () => true): void {
     const m = this.withProxy(batteryMesh());
     m.position.copy(pos);
     this.root.add(m);
-    this.items.push({ id, obj: m, base: pos.clone(), spin: false });
+    this.items.push({ id, obj: m, base: pos.clone(), spin: false, when });
     this.interactables.push({
       id,
       object: m,
-      prompt: () => (this.svc.progress.has(id) ? null : 'Take battery'),
+      prompt: () => (this.svc.progress.has(id) || !when() ? null : 'Take battery'),
       interact: () => {
         if (this.svc.collectBattery(id)) m.visible = false;
       },
@@ -63,6 +69,7 @@ export class Pickups {
 
   update(t: number): void {
     for (const p of this.items) {
+      p.obj.visible = this.shown(p);
       if (!p.obj.visible) continue;
       p.obj.position.y = p.base.y + Math.sin(t * 2 + p.base.x) * 0.03;
       if (p.spin) p.obj.rotation.y = t * 0.8;
@@ -70,6 +77,6 @@ export class Pickups {
   }
 
   refresh(): void {
-    for (const p of this.items) p.obj.visible = !this.svc.progress.has(p.id);
+    for (const p of this.items) p.obj.visible = this.shown(p);
   }
 }

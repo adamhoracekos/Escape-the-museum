@@ -1,5 +1,6 @@
 import { chapterById } from '../progress/chapters';
 import { createChapterStub } from './ChapterStub';
+import { createIceAge } from './iceAge/IceAge';
 import type { LevelFactory } from './Level';
 import { createRotunda } from './Rotunda';
 import { createTestRoom } from './TestRoom';
@@ -7,7 +8,7 @@ import { createTestRoom } from './TestRoom';
 /** Every level the game can load, by id. Chapters use placeholders until their real levels exist. */
 export const LEVELS: Record<string, LevelFactory> = {
   rotunda: createRotunda,
-  'ice-age': (svc) => createChapterStub(chapterById('ice-age')!, svc),
+  'ice-age': createIceAge,
   egypt: (svc) => createChapterStub(chapterById('egypt')!, svc),
   'test-room': createTestRoom,
 };
