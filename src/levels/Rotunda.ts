@@ -9,7 +9,10 @@ import { checkerTexture, posterTexture, signTexture } from '../world/textures';
 import { World, type DynamicCollider } from '../world/World';
 import type { Checkpoint, Level, LevelServices, Spawn } from './Level';
 import { corridorCoords, corridorDarkness, corridorProgress, panelLit, yawToCentre } from './rotunda/corridorMath';
+import { buildDecor, ROTUNDA_FACTS } from './rotunda/decor';
+import { createOrrery } from './rotunda/orrery';
 import { corridorPosters } from './rotunda/posters';
+import { factPosterTexture } from '../world/factPoster';
 
 /**
  * The rotunda: the lit, safe hub of the museum (GDD 9). Round hall under a dome with an
@@ -189,7 +192,7 @@ export function createRotunda(svc: LevelServices): Level {
       corridorPosters(ch.id).forEach((tex, i) => {
         const s = i % 2 ? 1 : -1;
         const poster = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.5), new THREE.MeshPhongMaterial({ map: tex, shininess: 30 }));
-        poster.position.set(s * (DOOR_HALF - 0.01), 1.75, MOUTH + 4 + i * 5.5);
+        poster.position.set(s * (DOOR_HALF - 0.01), 1.75, MOUTH + 3.5 + i * 4.1);
         poster.rotation.y = -s * (Math.PI / 2);
         poster.userData.noCollide = true;
         group.add(poster);
@@ -223,55 +226,11 @@ export function createRotunda(svc: LevelServices): Level {
   }
 
   // ----- orrery -----------------------------------------------------------------
-  const orrery = new THREE.Group();
+  const orr = createOrrery();
+  const orrery = orr.group;
+  orrery.userData.dynamic = true;
   root.add(orrery);
   solids.push(orrery);
-  const orrPed = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.8, 1.0, 32), MAT.gold);
-  orrPed.position.y = 0.5;
-  orrPed.castShadow = true;
-  orrery.add(orrPed);
-  const moving = new THREE.Group();
-  orrery.add(moving);
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.4, 12), MAT.gold);
-  post.position.y = 1.7;
-  const sunMat = new THREE.MeshBasicMaterial({ color: 0xffc42e });
-  const sun = new THREE.Mesh(new THREE.SphereGeometry(0.42, 32, 16), sunMat);
-  sun.position.y = 2.5;
-  const sunGlow = new THREE.PointLight(0xffc860, 4, 8, 1.5);
-  sunGlow.position.y = 2.5;
-  moving.add(post, sun, sunGlow);
-  const planetSpecs: [number, number, number][] = [
-    [0.9, 0.07, 0xb0b0b0],
-    [1.3, 0.11, 0xe8b46a],
-    [1.8, 0.12, 0x1f4fd1],
-    [2.3, 0.09, 0xd63a2a],
-    [3.0, 0.24, 0xd9b38c],
-  ];
-  const arms = planetSpecs.map(([r, s, c], i) => {
-    const arm = new THREE.Group();
-    arm.position.y = 2.5;
-    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, r, 6), MAT.gold);
-    rod.rotation.z = Math.PI / 2;
-    rod.position.x = r / 2;
-    const planet = new THREE.Mesh(new THREE.SphereGeometry(s, 24, 12), new THREE.MeshPhongMaterial({ color: c, shininess: 100 }));
-    planet.position.x = r;
-    planet.castShadow = true;
-    arm.add(rod, planet);
-    if (i === 4) {
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.44, 48), new THREE.MeshPhongMaterial({ color: 0xe8d2a6, side: THREE.DoubleSide }));
-      ring.rotation.x = 1.2;
-      planet.add(ring);
-    }
-    const orbit = new THREE.Mesh(new THREE.TorusGeometry(r, 0.006, 4, 96), MAT.gold);
-    orbit.rotation.x = Math.PI / 2;
-    orbit.position.y = 2.5;
-    moving.add(arm, orbit);
-    arm.userData.speed = 0.6 / Math.pow(r, 1.3);
-    arm.rotation.y = i * 1.7;
-    return arm;
-  });
-  moving.traverse((o) => (o.userData.noCollide = true));
-  orrery.userData.dynamic = true;
   let orrerySpeed = 1;
 
   // ----- plinths ----------------------------------------------------------------
@@ -337,7 +296,11 @@ export function createRotunda(svc: LevelServices): Level {
       anchor: new THREE.Vector3(pos.x, 1.75, pos.z),
       fig: () => (progress.isPlaced(ch.id) ? fig : `Plinth ${ch.numeral}`),
       text: () => {
-        if (progress.isPlaced(ch.id)) return ch.id === 'egypt' ? 'Heart scarab, green stone. Returned to the collection.' : 'Venus of Dolní Věstonice, fired clay, c. 29,000 BCE. Returned to the collection.';
+        if (progress.isPlaced(ch.id)) {
+          return ch.id === 'egypt'
+            ? 'Heart scarab, green stone. Laid over the heart of a mummy with a spell asking the heart not to speak against its owner.'
+            : 'Venus of Dolní Věstonice, fired clay, 29,000 to 25,000 BCE. Found in Moravia in 1925; the oldest known ceramic figure in the world.';
+        }
         if (progress.isCarrying(ch.id)) return `Reserved for the ${ch.artifact}. Bring it here.`;
         return `Reserved for the ${ch.artifact}.`;
       },
@@ -473,9 +436,30 @@ export function createRotunda(svc: LevelServices): Level {
       object: orrery,
       anchor: new THREE.Vector3(0, 2.95, 0),
       fig: 'Fig. 4',
-      text: () => (progress.placedCount() >= 1 ? 'Orrery, brass, 1903. Running backwards.' : 'Orrery, brass, 1903. The planets keep their places.'),
+      text: () =>
+        progress.placedCount() >= 1
+          ? 'Orrery, brass, 1903. Running backwards.'
+          : 'Orrery, brass, 1903. Named after the 4th Earl of Orrery, for whom one of the first was made around 1713.',
       warn: () => progress.placedCount() >= 1,
     },
+  );
+
+  for (const f of ROTUNDA_FACTS) {
+    const poster = wallPoster(f.angle, factPosterTexture(f.poster));
+    exhibits.push({ object: poster, anchor: poster.position.clone().setY(2.5), fig: f.fig, text: () => f.label });
+  }
+
+  // ----- decor ------------------------------------------------------------------
+  const columnAngles = Array.from({ length: 16 }, (_, k) => k).filter((k) => k % 4 !== 2).map((k) => (k / 16) * Math.PI * 2);
+  const decor = buildDecor(statics, root, {
+    radius: R,
+    height: H,
+    columnAngles,
+    doorAngles: DOOR_ANGLE,
+    chapterColors: Object.fromEntries(CHAPTERS.map((c) => [c.id, { color: c.color, ink: c.ink, numeral: c.numeral, title: c.title }])),
+  });
+  decor.fountains.forEach((f, i) =>
+    interactables.push({ id: `fountain-${i}`, object: f, prompt: () => 'Drink', interact: () => svc.toast('The water is lukewarm and tastes faintly of coins.') }),
   );
 
   // ----- light ------------------------------------------------------------------
@@ -553,7 +537,6 @@ export function createRotunda(svc: LevelServices): Level {
       // Orrery: slows, stops and runs backwards once the first artifact is back.
       const target = progress.placedCount() >= 1 ? -1 : 1;
       orrerySpeed += (target - orrerySpeed) * Math.min(1, dt * 0.35);
-      for (const arm of arms) arm.rotation.y += dt * arm.userData.speed * orrerySpeed * (1 - ending);
       for (const art of placedArtifacts.values()) if (art.visible) art.rotation.y += dt * 0.25;
 
       // Corridors: darkness follows how far in the player is.
@@ -581,8 +564,8 @@ export function createRotunda(svc: LevelServices): Level {
       hemi.intensity = 1.15 * lightK + 0.03;
       oculusLight.intensity = 2.4 * lightK;
       oculusMat.color.setRGB(1, 0.98, 0.9).multiplyScalar(Math.max(0.04, 1 - ending));
-      sunGlow.intensity = 4 * (1 - dark) * (ending > 0.3 ? 0 : 1);
-      sunMat.color.set(ending > 0.3 ? 0x3a2a08 : 0xffc42e);
+      decor.update(t, lightK);
+      orr.update(dt, orrerySpeed * (1 - ending), Math.max(dark, ending > 0.3 ? 1 : 0));
       bench.lamp.intensity = 3 + Math.sin(t * 1.3) * 0.15;
     },
     refresh() {
