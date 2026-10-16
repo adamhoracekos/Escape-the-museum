@@ -1,22 +1,16 @@
 import * as THREE from 'three';
-import { canvasTexture, posterTexture } from '../../world/textures';
+import { factPosterTexture, type FactPosterSpec } from '../../world/factPoster';
+import { canvasTexture } from '../../world/textures';
 
-type Diagram = (g: CanvasRenderingContext2D, w: number, h: number) => void;
-
-interface PosterSpec {
-  title: string;
-  bg: string;
-  fg: string;
-  diagram: Diagram;
+interface PosterSpec extends FactPosterSpec {
   /** What the same poster says once the corridor has gone grey. */
   wrong: string;
 }
 
-const FOOTER = 'Illustrated Encyclopedia · Vol. 2';
-
 const iceAge: PosterSpec[] = [
   {
     title: 'The Last Ice Age',
+    fact: 'About 20,000 years ago ice up to 3 km thick covered northern Europe and North America, and the sea was some 120 m lower than today.',
     bg: '#7fb7d9',
     fg: '#15171c',
     wrong: 'IT REMEMBERS THE COLD',
@@ -47,6 +41,7 @@ const iceAge: PosterSpec[] = [
   },
   {
     title: 'The Woolly Mammoth',
+    fact: 'The last woolly mammoths lived on Wrangel Island until about 4,000 years ago, when the pyramids of Giza were already standing.',
     bg: '#f2c230',
     fg: '#15171c',
     wrong: 'WALK. DO NOT RUN.',
@@ -76,6 +71,7 @@ const iceAge: PosterSpec[] = [
   },
   {
     title: 'Reading an Ice Core',
+    fact: 'Ice drilled in Antarctica traps bubbles of air up to 800,000 years old. Near the top, each thin layer is one year of snow.',
     bg: '#fbfaf6',
     fg: '#15171c',
     wrong: 'THEY HUNT IN THE DARK',
@@ -97,9 +93,38 @@ const iceAge: PosterSpec[] = [
   },
 ];
 
+iceAge.push({
+  title: 'The First Artists',
+  fact: 'The animals painted in Chauvet Cave in France are more than 30,000 years old, among the oldest cave paintings known.',
+  bg: '#d63a2a',
+  fg: '#fbfaf6',
+  wrong: 'KEEP THE LIGHT ON THEM',
+  diagram: (g, w) => {
+    g.fillStyle = '#f2e3c4';
+    g.beginPath();
+    g.ellipse(w / 2, 400, 200, 170, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#3b2a20';
+    g.beginPath();
+    g.ellipse(w / 2 - 10, 400, 110, 50, 0, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.ellipse(w / 2 + 110, 360, 40, 32, 0.3, 0, Math.PI * 2);
+    g.fill();
+    for (const x of [-80, -40, 30, 70]) g.fillRect(w / 2 + x, 430, 16, 70);
+    g.strokeStyle = '#3b2a20';
+    g.lineWidth = 8;
+    g.beginPath();
+    g.moveTo(w / 2 + 120, 335);
+    g.quadraticCurveTo(w / 2 + 170, 280, w / 2 + 150, 250);
+    g.stroke();
+  },
+});
+
 const egypt: PosterSpec[] = [
   {
     title: 'The Gift of the Nile',
+    fact: 'Every summer the Nile flooded and left black, fertile mud. The Egyptians called their country Kemet, the Black Land.',
     bg: '#d9a441',
     fg: '#15171c',
     wrong: 'SHE HEARS YOU',
@@ -123,6 +148,7 @@ const egypt: PosterSpec[] = [
   },
   {
     title: 'Reading Hieroglyphs',
+    fact: 'In 1822 Jean-François Champollion deciphered hieroglyphs, helped by the Rosetta Stone, which repeats one decree in three scripts.',
     bg: '#fbfaf6',
     fg: '#15171c',
     wrong: 'WALK SOFTLY',
@@ -147,6 +173,7 @@ const egypt: PosterSpec[] = [
   },
   {
     title: 'The Weighing of the Heart',
+    fact: 'In the afterlife the heart was weighed against the feather of Maat, goddess of truth. A heart heavy with wrongs was eaten by Ammit.',
     bg: '#1d9757',
     fg: '#fbfaf6',
     wrong: 'THE HEART IS WEIGHED',
@@ -184,9 +211,34 @@ const egypt: PosterSpec[] = [
   },
 ];
 
+egypt.push({
+  title: 'Canopic Jars',
+  fact: 'Four jars kept the liver, lungs, stomach and intestines of the dead. Each lid shows one of the four sons of Horus.',
+  bg: '#1f4fd1',
+  fg: '#fbfaf6',
+  wrong: 'SHE COUNTS YOUR STEPS',
+  diagram: (g) => {
+    const heads = ['#f2c230', '#d63a2a', '#1d9757', '#fbfaf6'];
+    heads.forEach((c, i) => {
+      const x = 90 + i * 110;
+      g.fillStyle = '#e8d2a6';
+      g.beginPath();
+      g.moveTo(x - 38, 560);
+      g.quadraticCurveTo(x - 52, 420, x - 30, 360);
+      g.lineTo(x + 30, 360);
+      g.quadraticCurveTo(x + 52, 420, x + 38, 560);
+      g.fill();
+      g.fillStyle = c;
+      g.beginPath();
+      g.arc(x, 330, 34, 0, Math.PI * 2);
+      g.fill();
+    });
+  },
+});
+
 /** The same poster drained of colour, darker, with its title replaced in red. */
 function wrongVersion(spec: PosterSpec): THREE.CanvasTexture {
-  const src = posterTexture(spec.title, 'DO NOT TURN AROUND', spec.bg, spec.fg, spec.diagram);
+  const src = factPosterTexture({ ...spec, footer: 'DO NOT TURN AROUND' });
   const img = src.image as HTMLCanvasElement;
   const tex = canvasTexture(img.width, img.height, (g, w, h) => {
     g.drawImage(img, 0, 0);
@@ -207,8 +259,8 @@ function wrongVersion(spec: PosterSpec): THREE.CanvasTexture {
   return tex;
 }
 
-/** Three friendly posters, then the same three gone wrong, in walking order. */
+/** Four friendly posters, then the same four gone wrong, in walking order. */
 export function corridorPosters(chapterId: string): THREE.CanvasTexture[] {
   const specs = chapterId === 'egypt' ? egypt : iceAge;
-  return [...specs.map((s) => posterTexture(s.title, FOOTER, s.bg, s.fg, s.diagram)), ...specs.map(wrongVersion)];
+  return [...specs.map(factPosterTexture), ...specs.map(wrongVersion)];
 }
