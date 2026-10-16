@@ -4,6 +4,8 @@
 - Before pushing: `npm run typecheck && npm test && npx vite build`.
 - Gameplay numbers live in `src/config.ts` and come from the design document (GDD v0.1). Change them there, not inline.
 - Player-facing text is English. Style: Utopian Scholastic labels ("Fig. N: ...") with black outlines and primary colours.
-- Pickup ids that count as artifact fragments must contain the word `fragment` (see `Game.fragmentsCollected`).
+- Progress is a set of namespaced ids in `src/progress/Progress.ts`: `<level>/fragment-N`, `<level>/battery-N`, `<chapter>/assembled`, `<chapter>/placed`. Changing the scheme means bumping `SAVE_VERSION`.
+- Static level geometry goes through `mergeStatic` to stay under the draw-call budget; mark anything animated, toggled or used as a look/interact target with `userData.dynamic = true` so it is not merged away.
+- Things that must stop blocking later (gates, ropes) use `World.addDynamic`, not the static solids list.
 - Levels implement `src/levels/Level.ts`; solid meshes go into `World` for collision, decorative ones get `userData.noCollide = true`.
-- `window.game` is exposed only in dev builds for browser-driven tests.
+- `window.game` is exposed only in dev builds for browser-driven tests. For deterministic tests stop the loop (`renderer.setAnimationLoop(null)`), stub `clock.getDelta` and call `game.frame()`.

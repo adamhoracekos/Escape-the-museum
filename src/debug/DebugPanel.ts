@@ -3,7 +3,7 @@ import * as THREE from 'three';
 /**
  * Developer overlay, toggled with the backquote key (`).
  * Shows player state and draws the current noise radius on the floor.
- * K simulates being caught, V shows the collision mesh.
+ * K simulates being caught, V shows the collision mesh, digits jump between levels.
  */
 export class DebugPanel {
   enabled = false;
@@ -48,7 +48,7 @@ export class DebugPanel {
     this.noiseRing.scale.setScalar(Math.max(0.01, noise));
     this.noiseRing.visible = noise > 0;
     const rows = Object.entries({ fps: this.fps, ...lines }).map(([k, v]) => `${k.padEnd(10)} ${v}`);
-    rows.push('', '` close   K caught   V collider');
+    rows.push('', '` close   K caught   V collider', '1 rotunda  2 ice age  3 egypt  0 test room', 'N all fragments here');
     this.box.textContent = rows.join('\n');
   }
 }

@@ -9,6 +9,8 @@ export class Input {
   private lookX = 0;
   private lookY = 0;
   private dragging = false;
+  /** Mouse events are ignored briefly after the pointer locks; see handleMouseMove. */
+  private ignoreUntil = 0;
   locked = false;
   dragLook = false;
   sensitivity = 0.0022;
@@ -89,10 +91,14 @@ export class Input {
 
   private handleLockChange = () => {
     this.locked = document.pointerLockElement === this.element;
+    if (this.locked) this.ignoreUntil = performance.now() + 120;
     this.onLockChange(this.locked);
   };
 
   private handleMouseMove = (e: MouseEvent) => {
+    // Chrome can report one huge movement right after the pointer locks, which would
+    // spin the camera at the start of a game. Drop those events.
+    if (performance.now() < this.ignoreUntil || Math.abs(e.movementX) > 400 || Math.abs(e.movementY) > 400) return;
     if (this.locked || (this.dragLook && this.dragging)) {
       this.lookX += e.movementX;
       this.lookY += e.movementY;

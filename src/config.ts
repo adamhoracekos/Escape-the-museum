@@ -56,5 +56,23 @@ export const INTERACT = {
   labelReach: 4,
 } as const;
 
+/** Corridors between the rotunda and the chapters (GDD 9): about 12 s of walking. */
+export const CORRIDOR = {
+  length: 36,
+  width: 3.4,
+  height: 3.6,
+  /** Distance from the far end at which the fade to the level starts. */
+  triggerFromEnd: 3,
+} as const;
+
+/** Fade to black between areas, with the chapter card in the middle (seconds). */
+export const TRANSITION = {
+  fadeOut: 0.9,
+  hold: 2.4,
+  holdShort: 0.8,
+  fadeIn: 1.2,
+} as const;
+
 export const SAVE_KEY = 'escape-the-museum.save';
-export const SAVE_VERSION = 1;
+/** Version 2: progress ids are namespaced by level ("ice-age/fragment-1"). Older saves are ignored. */
+export const SAVE_VERSION = 2;

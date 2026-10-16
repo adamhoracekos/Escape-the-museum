@@ -17,7 +17,8 @@ export interface Exhibit {
   object: THREE.Object3D;
   /** World point the label's leader line points at. */
   anchor: THREE.Vector3;
-  fig: string;
+  /** "Fig. 3", or a function when the figure number appears only later (an empty plinth has none). */
+  fig: string | (() => string);
   text(): string;
   /** Unsettling labels are drawn in red. */
   warn?(): boolean;
