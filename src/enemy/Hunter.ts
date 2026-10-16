@@ -12,9 +12,10 @@ export interface HunterOptions {
   route: THREE.Vector3[];
   spots: HidingSpot[];
   seed?: number;
+  heading?: number;
 }
 
-const EYE = 1.72;
+const EYE = 1.95;
 const COS_HALF_VIEW = Math.cos(THREE.MathUtils.degToRad(HUNTER.viewAngle / 2));
 
 function mulberry32(seed: number): () => number {
@@ -40,6 +41,8 @@ export class Hunter {
   readonly position = new THREE.Vector3();
   heading = 0;
   frozen = false;
+  /** A dormant hunter is only a figure: it neither senses nor moves until a level wakes it. */
+  active = true;
   /** Seconds since it last saw the player. */
   sinceSeen = Infinity;
 
@@ -64,6 +67,7 @@ export class Hunter {
     private nav: NavGrid,
     private svc: LevelServices,
   ) {
+    if (opts.heading !== undefined) this.heading = opts.heading;
     this.rng = mulberry32(opts.seed ?? 7);
     this.rig = createHunterRig();
     this.spotRefs = opts.spots.map((s) => ({ id: s.id, stand: s.stand, look: s.look }));
@@ -71,10 +75,32 @@ export class Hunter {
     this.brain = new HunterBrain({
       route: opts.route,
       spots: this.spotRefs,
-      randomPoint: (c, r) => nav.randomPoint(c, r, this.rng, this.component),
+      randomPoint: (c, r) => this.nav.randomPoint(c, r, this.rng, this.component),
     });
     this.brain.onChange = (from, to) => this.announce(from, to);
     this.reset();
+  }
+
+  /** Change where it may go, e.g. when a scripted gate lets it into the next hall. */
+  setTerritory(nav: NavGrid): void {
+    this.nav = nav;
+    this.component = nav.componentAt(this.position.x, this.position.z);
+    this.path = [];
+    this.pathGoal = null;
+  }
+
+  /** Scripted: come for the player now. */
+  alert(): void {
+    this.brain.alert(this.svc.player.feet.clone());
+  }
+
+  /** Put it somewhere else at once (pushed back out of a closing gate). */
+  place(pos: THREE.Vector3, heading = this.heading): void {
+    this.position.copy(pos);
+    this.heading = heading;
+    this.path = [];
+    this.pathGoal = null;
+    this.syncFigure(IDLE[0]);
   }
 
   get state(): HunterState {
@@ -83,7 +109,7 @@ export class Hunter {
 
   reset(): void {
     this.position.copy(this.opts.start);
-    this.heading = 0;
+    this.heading = this.opts.heading ?? 0;
     this.path = [];
     this.pathGoal = null;
     this.brain.reset();
@@ -132,6 +158,7 @@ export class Hunter {
   }
 
   update(dt: number): void {
+    if (!this.active) return;
     const p = this.svc.player;
     this.rig.root.updateMatrixWorld(true);
     this.frozen = this.isLit();
@@ -249,8 +276,10 @@ export class Hunter {
     this.frame = (this.frame + 1) % set.length;
 
     // Head turns to what it is looking at, within what a neck allows.
-    if (o.lookAt) {
-      const want = Math.atan2(o.lookAt.x - this.position.x, o.lookAt.z - this.position.z) - this.heading;
+    // When it can see you, the head finds you first, whatever the body is doing.
+    const watch = this.sinceSeen < 0.3 ? this.svc.player.feet : o.lookAt;
+    if (watch) {
+      const want = Math.atan2(watch.x - this.position.x, watch.z - this.position.z) - this.heading;
       this.headYaw = THREE.MathUtils.clamp(Math.atan2(Math.sin(want), Math.cos(want)), -1.2, 1.2);
     } else this.headYaw *= 0.4;
 

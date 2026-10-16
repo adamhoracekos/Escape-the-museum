@@ -35,8 +35,12 @@ export class NavGrid {
   readonly rows: number;
   /** Floor height per cell, NaN where nothing can stand. */
   readonly floor: Float32Array;
-  /** Connected component per cell, -1 when not walkable. */
-  readonly component: Int32Array;
+  /** Connected component per cell, -1 when not walkable. Gates count as open here. */
+  component: Int32Array;
+  /** Cells shut by a gate right now; shared by every restricted view of this grid. */
+  private blocked: Uint8Array;
+  /** Cells this walker may use at all (its territory), or null for everywhere. */
+  private mask: Uint8Array | null = null;
   private minX: number;
   private minZ: number;
   private maxStep: number;
@@ -53,6 +57,7 @@ export class NavGrid {
     const probeY = o.probeY ?? 3.8;
     this.floor = new Float32Array(this.cols * this.rows).fill(NaN);
     this.component = new Int32Array(this.cols * this.rows).fill(-1);
+    this.blocked = new Uint8Array(this.cols * this.rows);
 
     const origin = new THREE.Vector3();
     for (let j = 0; j < this.rows; j++) {
@@ -86,7 +91,47 @@ export class NavGrid {
   }
 
   walkable(i: number, j: number): boolean {
-    return this.inside(i, j) && !Number.isNaN(this.floor[this.index(i, j)]);
+    if (!this.inside(i, j)) return false;
+    const k = this.index(i, j);
+    return this.standable(k) && !this.blocked[k];
+  }
+
+  /** Floor, and inside the territory; ignores gates. */
+  private standable(k: number): boolean {
+    return !Number.isNaN(this.floor[k]) && (!this.mask || this.mask[k] === 1);
+  }
+
+  private cellsIn(minX: number, minZ: number, maxX: number, maxZ: number): number[] {
+    const out: number[] = [];
+    const [i0, j0] = this.cellOf(minX, minZ);
+    const [i1, j1] = this.cellOf(maxX, maxZ);
+    for (let j = Math.max(0, j0); j <= Math.min(this.rows - 1, j1); j++) {
+      for (let i = Math.max(0, i0); i <= Math.min(this.cols - 1, i1); i++) out.push(this.index(i, j));
+    }
+    return out;
+  }
+
+  /** A gate: while `set(true)`, nobody paths through this rectangle. */
+  addBlocker(minX: number, minZ: number, maxX: number, maxZ: number): { set(shut: boolean): void } {
+    const cells = this.cellsIn(minX, minZ, maxX, maxZ);
+    const blocked = this.blocked;
+    return {
+      set(shut) {
+        for (const k of cells) blocked[k] = shut ? 1 : 0;
+      },
+    };
+  }
+
+  /** A view of this grid limited to some rectangles: the walker's territory. Floor and gates stay shared. */
+  restrict(areas: { minX: number; minZ: number; maxX: number; maxZ: number }[]): NavGrid {
+    const view: NavGrid = Object.create(NavGrid.prototype);
+    Object.assign(view, this);
+    const mask = new Uint8Array(this.floor.length);
+    for (const a of areas) for (const k of this.cellsIn(a.minX, a.minZ, a.maxX, a.maxZ)) mask[k] = 1;
+    view.mask = mask;
+    view.component = new Int32Array(this.floor.length).fill(-1);
+    view.labelComponents();
+    return view;
   }
 
   /** Floor height under a point, or NaN when it is not walkable. */
@@ -108,7 +153,7 @@ export class NavGrid {
     let next = 0;
     const stack: number[] = [];
     for (let start = 0; start < this.floor.length; start++) {
-      if (Number.isNaN(this.floor[start]) || this.component[start] >= 0) continue;
+      if (!this.standable(start) || this.component[start] >= 0) continue;
       this.component[start] = next;
       stack.push(start);
       while (stack.length) {
@@ -118,7 +163,7 @@ export class NavGrid {
         for (const [di, dj] of NEIGHBOURS) {
           const ni = ci + di;
           const nj = cj + dj;
-          if (!this.canStep(ci, cj, ni, nj)) continue;
+          if (!this.canStep(ci, cj, ni, nj, true)) continue;
           const n = this.index(ni, nj);
           if (this.component[n] >= 0) continue;
           this.component[n] = next;
@@ -130,10 +175,11 @@ export class NavGrid {
   }
 
   /** Neighbour step: walkable, small height change, and no cutting corners past a wall. */
-  private canStep(ci: number, cj: number, ni: number, nj: number): boolean {
-    if (!this.walkable(ni, nj)) return false;
+  private canStep(ci: number, cj: number, ni: number, nj: number, ignoreGates = false): boolean {
+    const ok = (i: number, j: number) => (ignoreGates ? this.inside(i, j) && this.standable(this.index(i, j)) : this.walkable(i, j));
+    if (!ok(ni, nj)) return false;
     if (!this.stepOk(this.index(ci, cj), this.index(ni, nj))) return false;
-    if (ni !== ci && nj !== cj) return this.walkable(ni, cj) && this.walkable(ci, nj);
+    if (ni !== ci && nj !== cj) return ok(ni, cj) && ok(ci, nj);
     return true;
   }
 

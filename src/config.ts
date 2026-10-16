@@ -99,7 +99,7 @@ export const HUNTER = {
   poseRateMax: 12,
   holdChance: 0.07,
   holdTime: 0.45,
-  height: 1.9,
+  height: 2.1,
   radius: 0.4,
 } as const;
 

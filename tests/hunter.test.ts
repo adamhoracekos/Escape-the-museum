@@ -167,4 +167,20 @@ describe('NavGrid', () => {
     expect(path[path.length - 1].distanceTo(v(7.5, 5))).toBeLessThan(0.01);
     expect(nav.lineClear(2.5, 5, 7.5, 5)).toBe(false);
   });
+
+  it('keeps the far side out of reach while a gate is shut, in every territory view', () => {
+    const nav = new NavGrid(room(), { minX: 0, maxX: 10, minZ: 0, maxZ: 10, probeY: 2.5 });
+    const gate = nav.addBlocker(4.6, 8.8, 5.4, 10);
+    const left = nav.restrict([{ minX: 0, maxX: 6, minZ: 0, maxZ: 10 }]);
+    expect(left.componentAt(8, 3)).toBe(-1);
+    expect(left.componentAt(2.5, 5)).toBeGreaterThanOrEqual(0);
+    gate.set(true);
+    for (const n of [nav, left]) {
+      const path = n.findPath(v(2.5, 5), v(7.5, 5)) ?? [];
+      expect(path.every((p) => p.x < 5)).toBe(true);
+    }
+    gate.set(false);
+    const path = nav.findPath(v(2.5, 5), v(7.5, 5))!;
+    expect(path[path.length - 1].distanceTo(v(7.5, 5))).toBeLessThan(0.01);
+  });
 });

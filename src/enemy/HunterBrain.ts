@@ -82,6 +82,13 @@ export class HunterBrain {
     this.opening = null;
   }
 
+  /** Scripted: it knows exactly where you are and comes for you (a scare, a finale). */
+  alert(at: THREE.Vector3): void {
+    this.lastKnown.copy(at);
+    if (this.state !== 'chase') this.go('chase');
+    this.unseen = 0;
+  }
+
   /** Seconds left in the current search, for the debug panel. */
   get searchLeft(): number {
     return this.state === 'search' ? Math.max(0, HUNTER.searchTime - this.timer) : 0;
