@@ -75,7 +75,7 @@ Six zones from GDD 8.1, about 50 × 50 m:
 |---|---|---|
 | Z0 start | conservation table, way back west, staff door east (shortcut) | |
 | Z1 ice cores | order four cores by layer thickness; a hunter behind glass steps closer while unlit | 1 (freezer) |
-| Z2 diorama | two patrolling hunters, three loose mammoth bones in the snow, two cabinets | |
+| Z2 diorama | one patrolling hunter, three loose mammoth bones in the snow, two cabinets | |
 | Z3 mammoth hall | fit the bones; the skull turns, the north gate opens, the diorama hunters are let in | 2 |
 | Z4 ice lab | turn three mirrors to bring the heat lamp's beam to the ice block; a guard in the dark corner | 3 |
 | Z5 cave | taking the last fragment kills the light and wakes three hunters; the shortcut gate opens | 4 |

@@ -53,7 +53,7 @@ interface Area {
  *   Z5 Cave         x 30..44, z -48..-30   finale: fragment 4, lights out, three hunters
  *   Z4 Ice lab      x 14..30, z -46..-32   P3 heat lamp and mirrors, a guard in the dark corner
  *   Z3 Mammoth hall x 14..30, z -32..-16   P2 skeleton, the scare, gate north to Z4
- *   Z2 Diorama      x -6..14, z -32..-16   two hunters, three bones, snow
+ *   Z2 Diorama      x -6..14, z -32..-16   one hunter, three bones, snow
  *   Z1 Ice cores    x -2..12, z -16..-4    P1 stratigraphy, the hunter behind glass
  *   Z0 Start        x 0..10,  z -4..4      conservation table, passage back west
  *   Shortcut        Z5 south -> tunnel x 36..38 -> tunnel z -1..1 -> Z0 east door
@@ -632,11 +632,20 @@ export function createIceAge(svc: LevelServices): Level {
   const navCave = nav.restrict([AREA.z5, AREA.tunnelA, AREA.tunnelB]);
   const snap = (n: NavGrid, x: number, z: number) => n.nearest(x, z) ?? new THREE.Vector3(x, 0, z);
   const spots = cabinets.map((c) => c.spot);
-  const routeA = [snap(navZ2, -3.5, -24), snap(navZ2, 2.5, -30.5), snap(navZ2, 9, -31), snap(navZ2, 12.8, -25)];
-  const routeB = [snap(navZ2, 12.5, -18), snap(navZ2, 4.5, -17.5), snap(navZ2, -4.5, -18.5), snap(navZ2, 1.5, -21.5)];
+  // One hunter walks the whole diorama (playtest: two were too hard). To bring back a second,
+  // split this loop in two and add the new hunter to `dioramaHunters`.
+  const routeA = [
+    snap(navZ2, -3.5, -24),
+    snap(navZ2, 2.5, -30.5),
+    snap(navZ2, 9, -31),
+    snap(navZ2, 12.8, -25),
+    snap(navZ2, 12.5, -18),
+    snap(navZ2, 4.5, -17.5),
+    snap(navZ2, -4.5, -18.5),
+  ];
   const routeGuard = [snap(navGuard, 24.5, -40.5), snap(navGuard, 29, -40.5), snap(navGuard, 29, -45), snap(navGuard, 24.5, -45)];
   const hunterA = new Hunter({ id: 'hunter-a', start: routeA[0], route: routeA, spots, seed: 3 }, world, navZ2, svc);
-  const hunterB = new Hunter({ id: 'hunter-b', start: routeB[0], route: routeB, spots, seed: 5 }, world, navZ2, svc);
+  const dioramaHunters = [hunterA];
   const guard = new Hunter({ id: 'guard', start: routeGuard[0], route: routeGuard, spots, seed: 9 }, world, navGuard, svc);
   // Far enough from the pedestal (about 5.5 m) that a player who runs at once reaches the gate first.
   const trio = [
@@ -648,7 +657,7 @@ export function createIceAge(svc: LevelServices): Level {
     const heading = Math.atan2(LAMP.x - s.x, LAMP.z - s.z);
     return new Hunter({ id: `cave-${i}`, start: s, route: [s], spots: [], seed: 20 + i, heading }, world, navCave, svc);
   });
-  const hunters = [hunterA, hunterB, guard, ...trio];
+  const hunters = [...dioramaHunters, guard, ...trio];
   for (const h of hunters) root.add(h.rig.root);
   const hunterAnchors = hunters.map(() => new THREE.Vector3());
   hunters.forEach((h, i) => {
@@ -656,7 +665,7 @@ export function createIceAge(svc: LevelServices): Level {
     exhibits.push({
       object: h.rig.root,
       anchor: hunterAnchors[i],
-      fig: `Fig. ${[11, 12, 20, 21][Math.min(i, 3)]}`,
+      fig: h === guard ? 'Fig. 20' : trio.includes(h) ? 'Fig. 21' : `Fig. ${11 + i}`,
       text: () => {
         if (h.state === 'chase') return 'Hunter, Upper Palaeolithic. Hunting now.';
         if (isTrio && !h.active) return 'Hunters around a lamp, plaster group, 1936. Upper Palaeolithic people lit caves with lamps of burning fat.';
@@ -702,7 +711,7 @@ export function createIceAge(svc: LevelServices): Level {
     gateNorth.set(!done);
     skel.skull.rotation.y = done ? skullRest - 0.7 : skullRest;
     plaque.visible = !BONES.every(placed);
-    for (const h of [hunterA, hunterB]) h.setTerritory(done ? navZ2Z3 : navZ2);
+    for (const h of dioramaHunters) h.setTerritory(done ? navZ2Z3 : navZ2);
     scare = 0;
     // Beam and the ice block
     if (beamSolved()) mirrorState.splice(0, 3, ...MIRRORS.map((m) => m.want));
@@ -867,7 +876,7 @@ export function createIceAge(svc: LevelServices): Level {
         if (scare > 1.2 && northCollider.enabled) {
           northCollider.enabled = false;
           gateNorth.set(false);
-          for (const h of [hunterA, hunterB]) {
+          for (const h of dioramaHunters) {
             h.setTerritory(navZ2Z3);
             h.alert();
           }
