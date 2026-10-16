@@ -9,3 +9,5 @@
 - Things that must stop blocking later (gates, ropes) use `World.addDynamic`, not the static solids list.
 - Levels implement `src/levels/Level.ts`; solid meshes go into `World` for collision, decorative ones get `userData.noCollide = true`.
 - `window.game` is exposed only in dev builds for browser-driven tests. For deterministic tests stop the loop (`renderer.setAnimationLoop(null)`), stub `clock.getDelta` and call `game.frame()`.
+- Enemies: decisions live in `HunterBrain` (pure, unit-tested); the `Hunter` body senses, walks a `NavGrid` and animates. Levels list them in `Level.enemies` and reset them in `onRespawn`. A `NavGrid` probe height must sit under every lintel the enemy should pass.
+- The test room never writes the save (`Game.save` skips it), so the title-screen "Hunter test room" cannot clobber a real run.

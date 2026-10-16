@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ExtendedTriangle, MeshBVH } from 'three-mesh-bvh';
-import { PLAYER } from '../config';
+import { HIDING, PLAYER } from '../config';
 import type { Input } from '../core/Input';
 import type { World } from '../world/World';
 import { Stamina } from './Stamina';
@@ -30,6 +30,10 @@ export class Player {
   /** Looking around still works, walking does not (cutscenes). */
   movementLocked = false;
   onFootstep: (mode: MoveMode) => void = () => {};
+  /** Set while hiding: the camera sits at `eye` and may only look around a little (GDD 5). */
+  private anchor: { eye: THREE.Vector3; yaw: number; from: THREE.Vector3; fromYaw: number; fromPitch: number; t: number } | null = null;
+  private pulse = 0;
+  private pulseTime = 0;
 
   private bobDistance = 0;
   private lastStepIndex = 0;
@@ -43,6 +47,7 @@ export class Player {
   constructor(private camera: THREE.PerspectiveCamera) {}
 
   teleport(pos: THREE.Vector3, yaw: number): void {
+    this.anchor = null;
     this.position.copy(pos);
     this.velocity.set(0, 0, 0);
     this.yaw = yaw;
@@ -51,7 +56,64 @@ export class Player {
     this.height = PLAYER.standHeight;
   }
 
+  get hidden(): boolean {
+    return this.anchor !== null;
+  }
+
+  /** Climb into a hiding place: the camera glides in over HIDING.enterTime and the doors make a little noise. */
+  hideAt(eye: THREE.Vector3, yaw: number): void {
+    this.anchor = { eye: eye.clone(), yaw, from: this.camera.position.clone(), fromYaw: this.yaw, fromPitch: this.pitch, t: 0 };
+    this.velocity.set(0, 0, 0);
+    this.pulseNoise(HIDING.noise);
+  }
+
+  leaveHiding(exit: { position: THREE.Vector3; yaw: number }): void {
+    this.anchor = null;
+    this.teleport(exit.position, exit.yaw);
+    this.pulseNoise(HIDING.noise);
+  }
+
+  /** A one-off sound (a door, a dropped object) that enemies can hear for a moment. */
+  pulseNoise(radius: number): void {
+    this.pulse = Math.max(this.pulse, radius);
+    this.pulseTime = 0.3;
+  }
+
+  private updateHidden(dt: number, input: Input): void {
+    const a = this.anchor!;
+    const look = input.consumeLook();
+    a.t += dt;
+    const k = THREE.MathUtils.smoothstep(Math.min(1, a.t / HIDING.enterTime), 0, 1);
+    if (!this.frozen && k >= 1) {
+      this.yaw -= look.x;
+      this.pitch -= look.y;
+    }
+    const rel = Math.atan2(Math.sin(this.yaw - a.yaw), Math.cos(this.yaw - a.yaw));
+    const yawTarget = a.yaw + THREE.MathUtils.clamp(rel, -HIDING.yawRange, HIDING.yawRange);
+    if (k < 1) {
+      const d = Math.atan2(Math.sin(a.yaw - a.fromYaw), Math.cos(a.yaw - a.fromYaw));
+      this.yaw = a.fromYaw + d * k;
+      this.pitch = a.fromPitch * (1 - k);
+    } else {
+      this.yaw = yawTarget;
+      this.pitch = THREE.MathUtils.clamp(this.pitch, -HIDING.pitchRange, HIDING.pitchRange);
+    }
+    this.camera.position.lerpVectors(a.from, a.eye, k);
+    this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+    // Feet follow the camera so distance checks treat the player as inside.
+    this.position.set(this.camera.position.x, this.camera.position.y - this.height + PLAYER.eyeOffset, this.camera.position.z);
+    this.mode = 'idle';
+    this.stamina.update(dt, false, false);
+  }
+
   update(dt: number, input: Input, world: World): void {
+    this.pulseTime -= dt;
+    if (this.pulseTime <= 0) this.pulse = 0;
+    if (this.anchor) {
+      this.updateHidden(dt, input);
+      this.noise = this.pulse;
+      return;
+    }
     const look = input.consumeLook();
     if (!this.frozen) {
       this.yaw -= look.x;
@@ -91,7 +153,7 @@ export class Player {
     // Movement mode and noise come from what actually happened, not from the keys held.
     const horizSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     this.mode = horizSpeed < 0.3 ? 'idle' : this.crouching ? 'crouch' : sprinting ? 'sprint' : 'walk';
-    this.noise = noiseRadius(this.mode, world.surfaceAt(this.position));
+    this.noise = Math.max(noiseRadius(this.mode, world.surfaceAt(this.position)), this.pulse);
 
     // Head bob and footstep events.
     let bob = 0;

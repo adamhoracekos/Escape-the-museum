@@ -4,13 +4,15 @@ const CONTROLS: [string, string][] = [
   ['Ctrl or C', 'Crouch, quieter'],
   ['F', 'Flashlight on or off'],
   ['R', 'Swap in a spare battery'],
-  ['E', 'Interact'],
+  ['E', 'Interact, hide in a cabinet, leave it'],
   ['Esc', 'Pause'],
 ];
 
 export interface MenuHandlers {
   onContinue: () => void;
   onNewGame: () => void;
+  /** Straight into the test room with the hunter, without touching the save. */
+  onHunterTest: () => void;
   onResume: () => void;
   onBackToTitle: () => void;
 }
@@ -29,12 +31,13 @@ export class Menu {
     this.title.className = 'screen title-screen';
     this.title.innerHTML = `
       <div class="panel">
-        <p class="vol">Illustrated Encyclopedia · Volume 2 · Build 3: the Rotunda</p>
+        <p class="vol">Illustrated Encyclopedia · Volume 2 · Build 4: the Hunter</p>
         <h1>Escape the <span>Museum</span></h1>
         <p class="sub">The museum is closed. The exhibits are not.</p>
         <div class="buttons">
           <button type="button" class="primary" data-act="continue">Continue</button>
           <button type="button" data-act="new">New game</button>
+          <button type="button" data-act="hunter">Hunter test room</button>
         </div>
         <p class="note"></p>
         <ul class="controls">${controls}</ul>
@@ -70,6 +73,7 @@ export class Menu {
     this.note = this.title.querySelector('.note')!;
     this.continueBtn.addEventListener('click', h.onContinue);
     this.title.querySelector('[data-act="new"]')!.addEventListener('click', h.onNewGame);
+    this.title.querySelector('[data-act="hunter"]')!.addEventListener('click', h.onHunterTest);
     this.pause.querySelector('[data-act="resume"]')!.addEventListener('click', h.onResume);
   }
 

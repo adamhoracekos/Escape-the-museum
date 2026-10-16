@@ -25,6 +25,8 @@ export class Hud {
   private fragments: HTMLElement;
   private toastBox: HTMLElement;
   private caught: HTMLElement;
+  private slit: HTMLElement;
+  private slitText: HTMLElement;
   private caughtText: HTMLElement;
   private fade: HTMLElement;
   private fadeKicker: HTMLElement;
@@ -48,6 +50,8 @@ export class Hud {
     this.staminaFill = this.staminaBox.querySelector('.fill')!;
     this.fragments = el('div', 'fragments', this.root);
     this.toastBox = el('div', 'toast', this.root);
+    this.slit = el('div', 'slit', this.root, '<div class="bar top"></div><div class="bar bottom"><span></span></div>');
+    this.slitText = this.slit.querySelector('span')!;
     this.caught = el('div', 'caught', this.root, '<div class="card"><em>Collection record</em><strong></strong></div>');
     this.caughtText = this.caught.querySelector('strong')!;
     // The fade sits outside the HUD root so it still covers the screen when the HUD is hidden.
@@ -147,6 +151,13 @@ export class Hud {
     this.toastBox.textContent = text;
     this.toastBox.classList.add('show');
     this.toastTimer = seconds;
+  }
+
+  /** Looking out through the slit in a cabinet door, with the cabinet's label along the bottom. */
+  setHiding(caption: string | null, warn: boolean): void {
+    this.slit.classList.toggle('show', !!caption);
+    this.slit.classList.toggle('warn', warn);
+    if (caption && this.slitText.textContent !== caption) this.slitText.textContent = caption;
   }
 
   showCaught(text: string | null): void {
