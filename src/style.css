@@ -215,6 +215,45 @@ body {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+.slit {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.slit.show {
+  opacity: 1;
+}
+.slit .bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: #050403;
+  box-shadow: 0 0 40px 30px #050403;
+}
+.slit .bar.top {
+  top: 0;
+  height: 33%;
+}
+.slit .bar.bottom {
+  bottom: 0;
+  height: 33%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 48px;
+}
+.slit .bar.bottom span {
+  background: var(--paper);
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  padding: 6px 14px;
+  font: 700 18px var(--display);
+}
+.slit.warn .bar.bottom span {
+  color: var(--red);
+}
 .caught {
   position: absolute;
   inset: 0;

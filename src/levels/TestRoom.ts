@@ -4,6 +4,9 @@ import { World, type SurfaceZone } from '../world/World';
 import { MAT, benchMesh, box, bustMesh, coveredStatue, wall } from '../world/props';
 import { checkerTexture, gridTexture, noiseTexture, posterTexture, signTexture } from '../world/textures';
 import type { Checkpoint, Level, LevelServices } from './Level';
+import { Hunter } from '../enemy/Hunter';
+import { NavGrid } from '../enemy/NavGrid';
+import { cabinet } from './hiding';
 import { Pickups } from './pickups';
 
 /**
@@ -14,6 +17,9 @@ import { Pickups } from './pickups';
  *  Room B "Storage Gallery"   x  6..20, z -7..7   (dark: ramp, stairs, surfaces)
  *  Crawlspace                 x 20..24, z -0.8..0.8, 1.3 m high (crouch only)
  *  Alcove                     x 24..27, z -2..2
+ *
+ * Step 4 adds one Ice Age hunter patrolling the storage gallery and three cabinets to hide in,
+ * so every state of the enemy machine can be seen here (GDD 13).
  */
 export function createTestRoom(svc: LevelServices): Level {
   const root = new THREE.Group();
@@ -100,8 +106,8 @@ export function createTestRoom(svc: LevelServices): Level {
         g.fillStyle = '#15171c';
         g.font = '600 26px Jost, Futura, sans-serif';
         g.textAlign = 'left';
-        const tips = ['1. Keep your light on them.', '2. Walk. Running is loud.', '3. Rest where the lamps are green.', '4. Do not read every label.'];
-        tips.forEach((t, i) => g.fillText(t, 50, 230 + i * 70));
+        const tips = ['1. Keep your light on them.', '2. Walk. Running is loud.', '3. Hide where they did not', '    see you go.', '4. Do not stay hidden long.'];
+        tips.forEach((t, i) => g.fillText(t, 50, 220 + i * 56));
         g.strokeStyle = '#d63a2a';
         g.lineWidth = 6;
         g.beginPath();
@@ -239,8 +245,40 @@ export function createTestRoom(svc: LevelServices): Level {
     { object: poster, anchor: new THREE.Vector3(-5.8, 2.3, 1), fig: 'Fig. 4', text: () => 'Visitor guidance, printed after closing.' },
   ];
 
+  // Hiding places: two in the storage gallery, one in the lab.
+  const cabinets = [
+    cabinet('test-room/cabinet-north', 17.3, 7 - 0.15 - 0.375, Math.PI, svc),
+    cabinet('test-room/cabinet-west', 6 + 0.15 + 0.375, 4.5, Math.PI / 2, svc),
+    cabinet('test-room/cabinet-lab', 2.8, 5 - 0.15 - 0.375, Math.PI, svc),
+  ];
+  for (const c of cabinets) {
+    add(c.group);
+    interactables.push(c.interactable);
+  }
+
   const world = new World(solids, surfaces, 'tile');
   root.add(world.collider);
+
+  // Rays start under the 2.4 m door lintel so doorways read as open floor.
+  const nav = new NavGrid(world, { minX: -6, maxX: 27, minZ: -7, maxZ: 7, cell: 0.5, probeY: 2.3 });
+  const snap = (x: number, z: number) => nav.nearest(x, z) ?? new THREE.Vector3(x, 0, z);
+  const route = [snap(18.9, 0.2), snap(17.2, 4.6), snap(10.6, 1.6), snap(8.2, 0), snap(12.5, -3.2)];
+  const hunter = new Hunter({ id: 'hunter', start: route[0], route, spots: cabinets.map((c) => c.spot), seed: 11 }, world, nav, svc);
+  root.add(hunter.rig.root);
+  const hunterAnchor = new THREE.Vector3();
+  exhibits.push({
+    object: hunter.rig.root,
+    anchor: hunterAnchor,
+    fig: 'Fig. 5',
+    text: () =>
+      hunter.state === 'chase'
+        ? 'Hunter. It is not where it was put.'
+        : 'Hunter, plaster diorama figure. Gravettian hunters in Moravia lived on mammoth some 30,000 years ago.',
+    warn: () => hunter.state === 'chase',
+  });
+  const lamps = [labLamp, ...benches.map((b) => b.lamp)];
+  const lampBase = lamps.map((l) => l.intensity);
+  let flicker = 0;
 
   return {
     id: 'test-room',
@@ -256,12 +294,29 @@ export function createTestRoom(svc: LevelServices): Level {
     fog: null,
     exposure: 1.05,
     status: () => `Fragments ${found()} / ${TOTAL}`,
-    update(_dt, t) {
+    debug: () => `${hunter.state}${hunter.frozen ? ' (lit)' : ''}${hunter.brain.searchLeft ? ` ${hunter.brain.searchLeft.toFixed(0)} s` : ''}`,
+    enemies: [hunter],
+    onRespawn() {
+      hunter.reset();
+    },
+    update(dt, t) {
+      if (svc.player.active) hunter.update(dt);
+      hunterAnchor.copy(hunter.rig.root.position).setY(hunter.rig.root.position.y + 2.1);
+      for (const c of cabinets) c.update(dt);
       pickups.update(t);
       bust.rotation.y = found() >= 1 ? 0.9 : -0.5;
       statue.rotation.y = found() >= 2 ? Math.PI * 0.5 : -Math.PI * 0.5;
       exitLight.intensity = Math.sin(t * 9) + Math.sin(t * 3.7) > 1.5 ? 0.05 : 0.6;
       benches.forEach((b) => (b.lamp.intensity = 3 + Math.sin(t * 1.3) * 0.15));
+      // During a chase the lamps near the hunter stutter (GDD 7.1).
+      const chasing = hunter.state === 'chase';
+      flicker = chasing ? Math.min(1, flicker + dt * 3) : Math.max(0, flicker - dt);
+      lamps.forEach((l, i) => {
+        // Bench lamps were just set above; the lab lamp keeps its build-time brightness.
+        const base = i === 0 ? lampBase[0] : l.intensity;
+        const out = flicker > 0 && Math.sin(t * 31 + i * 7) + Math.sin(t * 13.7 + i) > 1.2 - flicker * 0.6;
+        l.intensity = out ? base * 0.15 : base;
+      });
     },
     refresh() {
       pickups.refresh();

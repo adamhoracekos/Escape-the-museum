@@ -73,6 +73,50 @@ export const TRANSITION = {
   fadeIn: 1.2,
 } as const;
 
+/** Ice Age hunters (GDD 7.1 and 7.2). Speeds in m/s, times in seconds. */
+export const HUNTER = {
+  patrolSpeed: 1.6,
+  searchSpeed: 2.0,
+  chaseSpeed: 4.4,
+  /** Full width of the view cone in degrees, and how far it reaches. */
+  viewAngle: 90,
+  viewDistance: 14,
+  /** Closer than this the hunter needs no confirmation: seeing you is enough. */
+  closeSight: 4,
+  /** Time in view needed to turn suspicion into a chase. */
+  confirmTime: 0.5,
+  /** Suspicion: stop, turn the head, then walk over to look. */
+  suspicionTime: 1.5,
+  /** Out of sight this long during a chase and the hunter goes to search. */
+  loseTime: 2.5,
+  searchTime: 20,
+  searchRadius: 6,
+  /** Stand in front of a hiding place for this long while searching. */
+  inspectTime: 2.2,
+  catchDistance: 0.95,
+  /** Puppet motion (GDD 7.1): the pose changes 8 to 12 times a second, with an occasional dead stop. */
+  poseRateMin: 8,
+  poseRateMax: 12,
+  holdChance: 0.07,
+  holdTime: 0.45,
+  height: 1.9,
+  radius: 0.4,
+} as const;
+
+/** Hiding places (GDD 5). */
+export const HIDING = {
+  enterTime: 0.6,
+  noise: 3,
+  /** Seen within this many seconds before you are inside, and the hunter knows where you are. */
+  seenWindow: 0.8,
+  /** After this long in one place the hunter comes to check it anyway. */
+  maxTime: 30,
+  warnTime: 20,
+  fov: 48,
+  yawRange: 0.55,
+  pitchRange: 0.3,
+} as const;
+
 export const SAVE_KEY = 'escape-the-museum.save';
 /** Version 2: progress ids are namespaced by level ("ice-age/fragment-1"). Older saves are ignored. */
 export const SAVE_VERSION = 2;

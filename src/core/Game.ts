@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { PLAYER, TRANSITION } from '../config';
+import { Sfx } from '../audio/Sfx';
+import { HIDING, PLAYER, TRANSITION } from '../config';
 import { DebugPanel } from '../debug/DebugPanel';
 import { LookTargets } from '../interaction/LookTargets';
 import type { Exhibit } from '../interaction/types';
-import type { Checkpoint, Level, LevelServices, TitleCard } from '../levels/Level';
+import type { Checkpoint, HidingSpot, Level, LevelServices, PlayerView, TitleCard } from '../levels/Level';
 import { FIRST_LEVEL, LEVELS } from '../levels/registry';
 import { Flashlight } from '../player/Flashlight';
 import { Player } from '../player/Player';
@@ -54,6 +55,8 @@ export class Game {
   private clock = new THREE.Clock();
   private elapsed = 0;
   private svc: LevelServices;
+  private sfx = new Sfx();
+  private hiding: { spot: HidingSpot; seconds: number; flashWasOn: boolean } | null = null;
 
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -74,6 +77,7 @@ export class Game {
     this.menu = new Menu(container, {
       onContinue: () => this.start(true),
       onNewGame: () => this.start(false),
+      onHunterTest: () => this.start(false, 'test-room'),
       onResume: () => this.resume(),
       onBackToTitle: () => this.backToTitle(),
     });
@@ -120,7 +124,73 @@ export class Game {
       toast: (t) => this.hud.toast(t, 4),
       saveAtCheckpoint: (cp) => this.reachCheckpoint(cp, true),
       travel: (to, spawn) => this.travel(to, spawn),
+      player: this.playerView(),
+      sfx: this.sfx,
+      catchPlayer: () => this.catchPlayer(),
+      hide: (spot) => this.hide(spot),
     };
+  }
+
+  private playerView(): PlayerView {
+    const game = this;
+    const eye = new THREE.Vector3();
+    const v = new THREE.Vector3();
+    return {
+      get active() {
+        return game.state === 'playing' && !game.transition;
+      },
+      get feet() {
+        return game.player.position;
+      },
+      get eye() {
+        return eye.copy(game.camera.position);
+      },
+      get noise() {
+        return game.player.noise;
+      },
+      get hidingIn() {
+        return game.hiding?.spot.id ?? null;
+      },
+      get hideSeconds() {
+        return game.hiding?.seconds ?? 0;
+      },
+      lights(point) {
+        if (!game.flashlight.illuminates(point)) return false;
+        const from = game.camera.position;
+        const dist = v.copy(point).sub(from).length();
+        return game.level.world.rayDistance(from, v.normalize(), dist) >= dist - 0.3;
+      },
+    };
+  }
+
+  // ----- hiding (GDD 5) ------------------------------------------------------
+
+  private hide(spot: HidingSpot): void {
+    if (this.state !== 'playing' || this.transition || this.hiding) return;
+    this.hiding = { spot, seconds: 0, flashWasOn: this.flashlight.on };
+    // No light shines out of a closed cabinet, and the beam would give you away.
+    this.flashlight.on = false;
+    spot.setOpen(true);
+    spot.setOccupied(true);
+    this.sfx.cue('creak', spot.look);
+    this.player.hideAt(spot.eye, spot.yaw);
+  }
+
+  private leaveHiding(): void {
+    const h = this.hiding;
+    if (!h) return;
+    this.hiding = null;
+    h.spot.setOpen(true);
+    h.spot.setOccupied(false);
+    this.sfx.cue('creak', h.spot.look);
+    this.player.leaveHiding(h.spot.exit);
+    this.flashlight.on = h.flashWasOn;
+  }
+
+  /** Being caught or teleported ends hiding without stepping out. */
+  private dropHiding(): void {
+    this.hiding?.spot.setOccupied(false);
+    this.hiding = null;
   }
 
   /** Makes a level the current one, building it the first time it is needed. */
@@ -145,6 +215,7 @@ export class Game {
   /** Puts the player at a spawn of the current level and makes its first bench the checkpoint. */
   private arrive(spawnId: string): void {
     const spawn = this.level.spawns[spawnId] ?? this.level.checkpoints[0];
+    this.dropHiding();
     this.player.teleport(spawn.position, spawn.yaw);
     this.checkpoint = this.level.checkpoints[0];
     const inRotunda = this.level.id === 'rotunda';
@@ -159,6 +230,8 @@ export class Game {
   }
 
   private save(): boolean {
+    // The test room is a sandbox: playing it must not overwrite the real game's save.
+    if (this.level.id === 'test-room') return true;
     return this.saves.save({
       levelId: this.level.id,
       checkpointId: this.checkpoint.id,
@@ -168,7 +241,7 @@ export class Game {
     });
   }
 
-  private start(continueSave: boolean): void {
+  private start(continueSave: boolean, sandbox: string | null = null): void {
     this.progress.load([]);
     this.flashlight.battery.charge = 1;
     this.flashlight.battery.spares = 0;
@@ -186,11 +259,17 @@ export class Game {
       const cp = this.level.checkpoints.find((c) => c.id === save.checkpointId) ?? this.level.checkpoints[0];
       this.checkpoint = cp;
       this.player.teleport(cp.position, cp.yaw);
+    } else if (sandbox) {
+      this.activate(sandbox);
+      this.level.refresh();
+      this.level.onRespawn?.();
+      this.arrive('start');
     } else {
       if (!continueSave) this.saves.clear();
       this.activate(FIRST_LEVEL);
       this.arrive('start');
     }
+    this.sfx.resume();
     this.input.requestLock();
     this.menu.hideAll();
     this.hud.setVisible(true);
@@ -212,6 +291,7 @@ export class Game {
     this.state = 'caught';
     this.caughtTimer = CAUGHT_SECONDS;
     this.player.frozen = true;
+    this.sfx.cue('shutter');
     this.hud.showCaught(`Fig. 41: Visitor. Acquired ${this.clockText()}.`);
   }
 
@@ -222,6 +302,9 @@ export class Game {
 
   private respawn(): void {
     this.hud.showCaught(null);
+    if (this.hiding) this.flashlight.on = true;
+    this.dropHiding();
+    this.level.onRespawn?.();
     this.player.teleport(this.checkpoint.position, this.checkpoint.yaw);
     this.flashlight.battery.topUpForRespawn();
     this.player.frozen = false;
@@ -283,6 +366,7 @@ export class Game {
   }
 
   private resume(): void {
+    this.sfx.resume();
     this.menu.hideAll();
     this.input.requestLock();
     this.player.frozen = this.transition?.phase === 'hold';
@@ -290,6 +374,20 @@ export class Game {
   }
 
   // ----- frame ---------------------------------------------------------------
+
+  /** The label on the cabinet you are in changes while you are in it (GDD 5). */
+  private hidingCaption(): string {
+    const h = this.hiding!;
+    if (h.seconds > HIDING.warnTime) return `Fig. 12: ${h.spot.label}. Not for much longer.`;
+    return `Fig. 12: ${h.spot.label}.`;
+  }
+
+  private updateFov(dt: number): void {
+    const want = this.hiding ? HIDING.fov : PLAYER.fov;
+    if (Math.abs(this.camera.fov - want) < 0.01) return;
+    this.camera.fov += (want - this.camera.fov) * Math.min(1, dt * 6);
+    this.camera.updateProjectionMatrix();
+  }
 
   private resize(): void {
     const w = this.container.clientWidth || window.innerWidth;
@@ -305,6 +403,10 @@ export class Game {
     if (this.state !== 'playing') return;
     if (i.wasPressed('Escape') && i.dragLook) this.pause();
     if (this.transition) return;
+    if (this.hiding) {
+      if (i.wasPressed('KeyE') && this.hiding.seconds > HIDING.enterTime) this.leaveHiding();
+      return;
+    }
     if (i.wasPressed('KeyF')) this.flashlight.toggle();
     if (i.wasPressed('KeyR')) {
       const b = this.flashlight.battery;
@@ -369,7 +471,10 @@ export class Game {
         this.updateTransition(dt);
       }
       this.player.update(dt, this.input, this.level.world);
+      if (this.hiding && this.state === 'playing') this.hiding.seconds += dt;
+      this.updateFov(dt);
       this.flashlight.update(dt, this.elapsed);
+      this.sfx.setListener(this.camera);
       this.level.update(dt, this.elapsed, this.player.position);
       this.look.update(this.camera, this.level.world);
 
@@ -386,9 +491,11 @@ export class Game {
       if (this.state === 'ending') this.updateEnding(dt);
 
       const b = this.flashlight.battery;
-      const interactive = this.state === 'playing' && !this.transition;
-      this.hud.setPrompt(interactive ? (this.look.focused?.prompt() ?? null) : null);
+      const interactive = this.state === 'playing' && !this.transition && !this.hiding;
+      const hidePrompt = this.hiding && this.hiding.seconds > HIDING.enterTime && this.state === 'playing' ? 'Leave the cabinet' : null;
+      this.hud.setPrompt(interactive ? (this.look.focused?.prompt() ?? null) : hidePrompt);
       this.hud.setLabel(interactive ? this.look.focusedExhibit : null, this.camera, this.container.clientWidth, this.container.clientHeight);
+      this.hud.setHiding(this.hiding && this.state === 'playing' ? this.hidingCaption() : null, !!this.hiding && this.hiding.seconds > HIDING.warnTime);
       this.hud.setBattery(b.charge, b.spares, this.flashlight.on, b.isLow);
       this.hud.setStamina(this.player.stamina.fraction, this.player.stamina.isExhausted);
       this.hud.setStatus(this.state === 'ending' ? null : this.level.status());
@@ -420,6 +527,8 @@ export class Game {
         checkpoint: this.checkpoint?.id ?? '-',
         look: this.look.focused?.id ?? (ex ? (typeof ex.fig === 'string' ? ex.fig : ex.fig()) : '-'),
         drawCalls: this.renderer.info.render.calls,
+        hiding: this.hiding ? `${this.hiding.spot.id} ${this.hiding.seconds.toFixed(0)} s` : '-',
+        enemy: this.level.debug?.() ?? '-',
       },
       p.position,
       p.noise,
